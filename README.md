@@ -16,22 +16,30 @@ This repository implements **two reinforcement learning approaches** for estimat
 - **Learning**: Actor-Critic policy gradients
 - **Focus**: End-to-end RIR transformation learning
 
-## Experimental Results
+## Experimental Results (Enhanced Neural Method)
 
-| Metric | DQN | Neural | Winner |
-|--------|-----|--------|--------|
-| Training Time (s) | 2.03 | 1.87 | **Neural** |
-| RIR Estimates | 16 | 80 | **Neural** |
-| Final DRR (dB) | -5.59 | -7.09 | **DQN** |
-| Mean DRR (dB) | -5.99 | 0.75 | **Neural** |
-| Final Energy | 60.470 | 7.290 | **Neural** |
-| Final Sparsity | 0.061 | 0.098 | **Neural** |
+| Metric | DQN | Enhanced Neural | Winner |
+|--------|-----|-----------------|--------|
+| Training Time (s) | 1.85 | 1.96 | **Similar** |
+| RIR Estimates | 16 | 60 | **Neural** |
+| Final DRR (dB) | -4.33 | **+7.70** | **Neural** |
+| Mean DRR (dB) | -4.71 | **+9.59** | **Neural** |
+| Final Energy | 60.470 | 0.671 | **Neural** |
+| Final Sparsity | 0.061 | 0.700 | **Neural** |
+| Realism Score | N/A | **100/100** | **Neural** |
+
+### 🏗️ Acoustic Structure Analysis (Enhanced Neural)
+- **Direct Sound**: 59.9-69.8% (realistic dominance)
+- **Early Reflections**: 12.6-20.1% (substantial presence) 
+- **Late Reverberation**: 11.5-12.8% (proper decay)
+- **Tail**: 6.1-8.0% (natural fade-out)
 
 **Key Findings:**
-- Neural method generates 5× more RIR estimates with similar training time
-- Neural approach shows better mean DRR (0.75 vs -5.99 dB) 
-- Neural method produces more realistic sparse RIRs
-- Both methods achieve practical performance for streaming applications
+- ✅ **Positive DRR Achievement**: Neural method reaches +7.70 dB (vs -4.33 dB DQN)
+- ✅ **Natural RIR Structure**: Realistic energy distribution across acoustic zones
+- ✅ **Acoustic Realism**: 100/100 realism score with proper reverberation patterns
+- ✅ **Performance**: 3.75× more RIR estimates with +14.3 dB DRR improvement
+- ✅ **Practical Quality**: Suitable for real audio applications with natural room acoustics
 
 ## Problem and Signal Model
 
