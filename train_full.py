@@ -33,6 +33,7 @@ from rl_framework import (
     DQNAgent,
     train_rir_agent,
 )  # type: ignore
+from neural_rir_agent import NeuralRIRAgent, NeuralRIREnvironment, compute_drr  # type: ignore
 from audio_processing import AudioProcessor  # type: ignore
 from dereverberation import BlindDereverberation  # type: ignore
 from rir_estimation import DeconvolutionRIREstimator  # type: ignore
@@ -127,6 +128,7 @@ def main():
     parser.add_argument('--output-dir', type=str, default='experiments', help='Output directory for artifacts')
     parser.add_argument('--stream-dir', type=str, default=None, help='Directory containing incoming .wav segments for streaming mode')
     parser.add_argument('--watch', action='store_true', help='Continuously watch stream-dir for new files')
+    parser.add_argument('--neural', action='store_true', help='Use Neural RIR agent instead of DQN')
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -147,13 +149,21 @@ def main():
     wandb = maybe_init_wandb(config)
 
     # Create env and agent
-    env = create_environment(config)
-    agent = create_agent(env, config)
+    if args.neural:
+        # Use Neural RIR approach
+        rir_length = config.get('environment', {}).get('rir_length', 1024)
+        max_iterations = config.get('environment', {}).get('max_iterations', 20)
+        env = NeuralRIREnvironment(max_iterations=max_iterations, rir_length=rir_length)
+        agent = NeuralRIRAgent(rir_length=rir_length, learning_rate=1e-3)
+    else:
+        # Use DQN approach
+        env = create_environment(config)
+        agent = create_agent(env, config)
 
     # If streaming mode enabled, process incoming segments iteratively
     stream_cfg = config.get('streaming', {})
     stream_enabled = bool(stream_cfg.get('enabled', False) or args.stream_dir)
-    if stream_enabled:
+    if stream_enabled and not args.neural:
         from glob import glob
         import time
         sr = int(config.get('audio_processing', {}).get('sample_rate', 16000))
@@ -190,6 +200,7 @@ def main():
 
                         # Train on this segment for max_iterations
                         total_reward = 0.0
+                        seg_name = Path(w).stem
                         for step in range(env.max_iterations):
                             a = agent.act(state, training=True)
                             if codebook is not None and not hasattr(a, '__len__'):
@@ -200,6 +211,12 @@ def main():
                             agent.remember(state, action, reward, next_state, terminated or truncated)
                             state = next_state
                             total_reward += reward
+                            
+                            # Save per-step global RIR if available
+                            if hasattr(env, 'global_rir_estimate') and env.global_rir_estimate is not None:
+                                step_file = out_dir / f'{seg_name}_step_{step:02d}_rir.npy'
+                                np.save(step_file, env.global_rir_estimate)
+                            
                             if terminated or truncated:
                                 break
                         agent.replay()
@@ -218,14 +235,83 @@ def main():
         finally:
             pass
         stats = []
+    elif stream_enabled and args.neural:
+        # Neural streaming mode (simplified)
+        from glob import glob
+        import time
+        sr = int(config.get('audio_processing', {}).get('sample_rate', 16000))
+        ap = AudioProcessor(sample_rate=sr)
+        stream_dir = args.stream_dir or stream_cfg.get('stream_dir', 'data/stream')
+        
+        logger.info(f"Neural streaming mode: {stream_dir}")
+        wavs = sorted(glob(os.path.join(stream_dir, '*.wav')))
+        stats = []
+        
+        for w in wavs[:4]:  # Process first 4 segments
+            audio, _ = ap.load_audio(w, target_sr=sr)
+            state = env.reset(audio)
+            total_reward = 0
+            seg_name = Path(w).stem
+            
+            for step in range(env.max_iterations):
+                next_state, reward, terminated, info = env.step(agent)
+                total_reward += reward
+                
+                # Save per-step RIR
+                step_file = out_dir / f'{seg_name}_step_{step:02d}_rir_neural.npy'
+                np.save(step_file, env.current_rir)
+                
+                if terminated:
+                    break
+            
+            agent.end_episode()
+            logger.info(f"Processed {seg_name}, reward={total_reward:.3f}")
+            stats.append({'total_reward': total_reward, 'steps': step+1})
     else:
         # Non-streaming episodic training
         train_cfg = config.get('training', {})
         episodes = int(train_cfg.get('episodes', 20))
         max_steps = int(train_cfg.get('max_steps', 50))
 
-        logger.info(f"Starting training: episodes={episodes}, max_steps={max_steps}")
-        stats = train_rir_agent(env=env, agent=agent, episodes=episodes, max_steps=max_steps)
+        if args.neural:
+            # Neural episodic training
+            logger.info(f"Starting Neural training: episodes={episodes}, max_steps={max_steps}")
+            stats = []
+            
+            # Generate synthetic data for training
+            for episode in range(episodes):
+                # Simple synthetic scenario
+                sr = 16000
+                t = np.linspace(0, 1.0, sr)
+                clean = 0.2 * np.sin(2 * np.pi * 440 * t) * np.exp(-t * 0.5)
+                
+                # Random RIR for variety
+                rir_len = env.rir_length
+                true_rir = np.zeros(rir_len)
+                true_rir[0] = 1.0
+                for i in range(1, min(200, rir_len)):
+                    true_rir[i] = 0.1 * np.exp(-i / 50) * np.random.randn()
+                
+                reverb = np.convolve(clean, true_rir, mode='same')
+                
+                state = env.reset(reverb, clean)
+                total_reward = 0
+                
+                for step in range(max_steps):
+                    next_state, reward, terminated, info = env.step(agent)
+                    total_reward += reward
+                    if terminated:
+                        break
+                
+                agent.end_episode()
+                stats.append({'total_reward': total_reward, 'steps': step+1})
+                
+                if episode % 5 == 0:
+                    logger.info(f"Episode {episode}, Reward: {total_reward:.2f}, Steps: {step+1}")
+        else:
+            # DQN episodic training
+            logger.info(f"Starting DQN training: episodes={episodes}, max_steps={max_steps}")
+            stats = train_rir_agent(env=env, agent=agent, episodes=episodes, max_steps=max_steps)
 
     # Save stats
     np.savez(out_dir / 'training_results.npz', training_stats=stats)

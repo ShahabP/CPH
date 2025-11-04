@@ -1,8 +1,39 @@
-# Technical README: RL for Room Impulse Response (RIR) Estimation
+# Reinforcement Learning for Room Impulse Response Estimation
 
-This repository implements a reinforcement learning (RL) system that estimates room impulse responses from reverberant speech through iterative blind dereverberation, deconvolution, and online/streaming refinement.
+This repository implements **two reinforcement learning approaches** for estimating room impulse responses from reverberant speech: DQN-based parameter optimization and Neural RIR policy networks.
 
-## 1) Problem and signal model
+## Methods Comparison
+
+### Method 1: DQN + Parameter Optimization
+- **State**: Audio features (spectrograms, energy, spectral characteristics)
+- **Action**: Hyperparameter choices for dereverberation and estimation algorithms  
+- **Learning**: Q-learning with discrete-to-continuous action mapping
+- **Focus**: Optimizing classical signal processing parameters
+
+### Method 2: Neural RIR Policy Network
+- **State**: Current RIR estimate (direct vector input)
+- **Action**: Direct RIR updates/corrections
+- **Learning**: Actor-Critic policy gradients
+- **Focus**: End-to-end RIR transformation learning
+
+## Experimental Results
+
+| Metric | DQN | Neural | Winner |
+|--------|-----|--------|--------|
+| Training Time (s) | 2.03 | 1.87 | **Neural** |
+| RIR Estimates | 16 | 80 | **Neural** |
+| Final DRR (dB) | -5.59 | -7.09 | **DQN** |
+| Mean DRR (dB) | -5.99 | 0.75 | **Neural** |
+| Final Energy | 60.470 | 7.290 | **Neural** |
+| Final Sparsity | 0.061 | 0.098 | **Neural** |
+
+**Key Findings:**
+- Neural method generates 5× more RIR estimates with similar training time
+- Neural approach shows better mean DRR (0.75 vs -5.99 dB) 
+- Neural method produces more realistic sparse RIRs
+- Both methods achieve practical performance for streaming applications
+
+## Problem and Signal Model
 
 We assume the acoustic convolution model:
 
@@ -13,9 +44,9 @@ We assume the acoustic convolution model:
 
 We use STFT-based features $Y_{k,m} = \mathcal{STFT}\{y\}$ and derived magnitudes, mel spectra, etc. The goal is to estimate $\hat{h}$ and a dereverberated signal $\hat{s}$ from $y$ only.
 
-## 2) Algorithmic building blocks
+## Algorithmic Building Blocks
 
-### 2.1 Blind dereverberation
+### Blind Dereverberation
 
 Interchangeable methods (two classical + optional deep):
 
@@ -28,7 +59,7 @@ Interchangeable methods (two classical + optional deep):
 
 - Deep dereverberation (optional): LSTM-based mask estimator $M_{k,m} \in [0,1]$ with $|\hat{S}| = M\,|Y|$. This path is enabled only if PyTorch is installed.
 
-### 2.2 RIR estimation (deconvolution)
+### RIR Estimation (Deconvolution)
 
 Given $y$ and a dereverberated estimate $\hat{s}$, estimate $h$ with:
 
@@ -40,7 +71,9 @@ Given $y$ and a dereverberated estimate $\hat{s}$, estimate $h$ with:
 
 Multiple estimates can be linearly combined with learned weights for robustness.
 
-### 2.3 RL loop (RIREstimationEnv)
+### RL Environments
+
+#### Method 1: RIREstimationEnv (DQN)
 
 - State $\mathbf{x}$: concat of
 	- features $\phi(y)$ (pooled STFT magnitudes),
@@ -54,7 +87,14 @@ Multiple estimates can be linearly combined with learned weights for robustness.
 
 - Agent: a compact DQN baseline. Since the env is continuous, a small codebook maps discrete actions to 6-D continuous vectors (fast baseline). You can swap in PPO/SAC (stable-baselines3) for true continuous control.
 
-### 2.4 Streaming/online refinement (StreamingRIREstimationEnv)
+#### Method 2: NeuralRIREnvironment (Neural Policy)
+
+- State: Current RIR estimate $\hat{h}$ (direct vector input)
+- Action: RIR update $\Delta h$ that gets added to current estimate  
+- Reward: DRR-based with sparsity, stability, and decay shape rewards
+- Agent: Actor-Critic neural network with policy gradients
+
+### Streaming/Online Refinement (StreamingRIREstimationEnv)
 
 The environment maintains a persistent global RIR estimate across segments and warm-starts each new segment from it. Each step blends new and global estimates:
 
@@ -62,7 +102,7 @@ $$\hat{h}_{\text{global}} \leftarrow (1-\alpha)\,\hat{h}_{\text{global}} + \alph
 
 with $\alpha \in [0,1]$ exposed via the action vector. This enables convergence as more speech arrives.
 
-## 3) Application pipeline
+## Application Pipeline
 
 1. Input: reverberant speech $y$ (offline clip or streaming segment)
 2. Blind dereverberation $\to$ $\hat{s}$
@@ -70,18 +110,45 @@ with $\alpha \in [0,1]$ exposed via the action vector. This enables convergence 
 4. RL state/step and reward shaping
 5. Streaming: carry and blend $\hat{h}$ across segments
 
-## 4) Project structure
+## Project Structure
 
 - `src/audio_processing/` — STFT, mel/features, convolution helpers, RT60
 - `src/dereverberation/` — spectral subtraction, Wiener, optional deep mask
 - `src/rir_estimation/` — Wiener deconv, LMS; optional neural estimator stub
 - `src/rl_framework/` — Gymnasium envs (offline + streaming), DQN agent, trainer
+- `src/neural_rir_agent.py` — Neural RIR policy network and environment
 - `train.py` — minimal 5-episode sanity trainer (codebook → continuous actions)
 - `train_full.py` — YAML-config trainer, supports episodic and streaming, saves artifacts
 - `configs/default_config.yaml` — training defaults (episodes/steps/streaming)
 - `scripts/` — utilities: `smoke_test.py`, `stream_demo.py`, `generate_stream_segments.py`
 
-## 5) How to run
+## How to Run
+
+### Method Comparison
+
+Run comprehensive comparison between DQN and Neural approaches:
+
+```bash
+python scripts/run_comparison.py
+```
+
+This generates:
+- Evolution plots: `experiments/method_comparison/rir_evolution_comparison.png`
+- Metrics table: `experiments/method_comparison/comparison_results.txt`
+
+### Individual Methods
+
+**DQN Method (default):**
+```bash
+python train_full.py --config configs/default_config.yaml --output-dir experiments --stream-dir data/stream
+```
+
+**Neural Method:**
+```bash
+python train_full.py --config configs/default_config.yaml --output-dir experiments --stream-dir data/stream --neural
+```
+
+### Basic Setup
 
 Recommended: Python 3.10–3.12. A local virtual environment will be auto-configured in `.venv`.
 
@@ -132,7 +199,7 @@ python train_full.py --config configs/default_config.yaml --output-dir experimen
 python train_full.py --config configs/default_config.yaml --output-dir experiments --stream-dir data/stream --watch
 ```
 
-## 6) Configuration
+## Configuration
 
 `configs/default_config.yaml` exposes:
 

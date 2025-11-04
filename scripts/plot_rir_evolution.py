@@ -7,13 +7,24 @@ import matplotlib.pyplot as plt
 
 
 def find_rir_files(root: Path):
-    # Find files like segment_XX_rir.npy under root
+    # Find files like segment_XX_rir.npy or segment_XX_step_YY_rir.npy under root
     files = list(root.glob("*_rir.npy"))
-    # Try to sort by embedded index if present
+    # Sort by embedded segment and step indices
     def key_fn(p: Path):
-        m = re.search(r"(\d+)", p.stem)
-        return int(m.group(1)) if m else -1
-    files_sorted = sorted(files, key=lambda p: (key_fn(p), p.stat().st_mtime))
+        stem = p.stem
+        # Look for segment_XX_step_YY pattern first
+        m = re.search(r"segment_(\d+)_step_(\d+)_rir", stem)
+        if m:
+            return (int(m.group(1)), int(m.group(2)))
+        # Fall back to segment_XX pattern
+        m = re.search(r"segment_(\d+)_rir", stem)
+        if m:
+            return (int(m.group(1)), 999)  # Put segment-level after all steps
+        # Generic numeric pattern
+        m = re.search(r"(\d+)", stem)
+        return (int(m.group(1)) if m else -1, 999)
+    
+    files_sorted = sorted(files, key=key_fn)
     return files_sorted
 
 
