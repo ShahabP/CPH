@@ -1,0 +1,108 @@
+# Default training configuration for RL-based RIR estimation
+
+project_name: rir-rl-estimation
+experiment_name: quick_start
+use_wandb: false
+seed: 42
+
+environment:
+  max_iterations: 20
+  rir_length: 1024
+  feature_dim: 513
+  action_space_type: continuous
+
+audio_processing:
+  sample_rate: 16000
+  n_fft: 1024
+  hop_length: 256
+
+dereverberation:
+  method: spectral_subtraction
+
+rir_estimation:
+  method: wiener_deconv
+  regularization: 0.001
+
+agent:
+  learning_rate: 0.001
+  gamma: 0.99
+  epsilon: 1.0
+  epsilon_decay: 0.995
+  epsilon_min: 0.01
+  memory_size: 10000
+  discrete_actions: 16  # for continuous env, we discretize actions
+
+training:
+  episodes: 20
+  max_steps: 50
+
+streaming:
+  enabled: false
+  stream_dir: data/stream
+  poll_interval_sec: 2.0
+# Default configuration for RIR estimation using RL
+
+# Project settings
+project_name: "rir_rl_estimation"
+experiment_name: "default_experiment"
+use_wandb: false
+seed: 42
+
+# Audio processing settings
+audio_processing:
+  sample_rate: 16000
+  n_fft: 1024
+  hop_length: 256
+  win_length: 1024
+
+# Dereverberation settings
+dereverberation:
+  method: "spectral_subtraction"  # Options: spectral_subtraction, wiener, deep
+  alpha: 2.0  # Over-subtraction factor
+  beta: 0.01  # Spectral floor factor
+
+# RIR estimation settings
+rir_estimation:
+  method: "wiener_deconv"  # Options: wiener_deconv, lms, rls
+  regularization: 0.001
+  rir_length: 1024
+
+# Environment settings
+environment:
+  max_iterations: 10
+  rir_length: 1024
+  feature_dim: 513
+  action_space_type: "continuous"  # Options: continuous, discrete
+
+# Agent settings
+agent:
+  learning_rate: 0.001
+  gamma: 0.99
+  epsilon: 1.0
+  epsilon_decay: 0.995
+  epsilon_min: 0.01
+  memory_size: 10000
+  discrete_actions: 64  # For continuous action space discretization
+
+# Training settings
+training:
+  episodes: 1000
+  max_steps: 200
+  batch_size: 32
+  target_update_freq: 10
+  save_freq: 100
+  eval_freq: 50
+
+# Data settings
+data:
+  train_data_path: "data/train/"
+  val_data_path: "data/val/"
+  test_data_path: "data/test/"
+  synthetic_data: true
+  data_augmentation: true
+
+# Evaluation settings
+evaluation:
+  metrics: ["correlation", "mse", "sdr", "rt60"]
+  save_audio_samples: true
+  num_eval_episodes: 10
