@@ -25,7 +25,7 @@ def synth_segment(sr=16000, dur=1.0, f0=220.0, rir_len=512):
 
 
 def main():
-    env = StreamingRIREstimationEnv(max_iterations=10)
+    env = StreamingRIREstimationEnv(max_iterations=20)
 
     # Create agent (discretized actions)
     try:
