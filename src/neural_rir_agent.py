@@ -16,14 +16,12 @@ from collections import deque
 import random
 
 
-def compute_drr(rir: np.ndarray, sample_rate: int = 16000, 
-                direct_window_ms: float = 2.5) -> float:
+def compute_rir_drr_metric(rir: np.ndarray, sample_rate: int = 16000, 
+                          direct_window_ms: float = 2.5) -> float:
     """
-    Compute Direct-to-Reverberant Ratio (DRR) from RIR.
-    Optimized for achieving positive DRR values by:
-    1. Better direct sound window detection
-    2. Improved energy ratio calculation
-    3. Handling edge cases for sparse RIRs
+    Compute DRR-like metric from RIR structure (for monitoring only).
+    NOTE: This is NOT the actual DRR - it's just a structural metric.
+    The real DRR should be computed on dereverberated speech.
     
     Args:
         rir: Room impulse response
@@ -351,6 +349,88 @@ class NeuralRIRAgent:
         
         return rir
     
+    def _dereverberate_with_rir(self, reverb_audio: np.ndarray, rir: np.ndarray) -> np.ndarray:
+        """
+        Dereverberate audio using estimated RIR via Wiener deconvolution.
+        
+        Args:
+            reverb_audio: Reverberant speech signal
+            rir: Estimated room impulse response
+            
+        Returns:
+            Dereverberated speech signal
+        """
+        from scipy import signal
+        
+        # Pad RIR to avoid circular convolution artifacts
+        rir_padded = np.zeros(len(reverb_audio) + len(rir) - 1)
+        rir_padded[:len(rir)] = rir
+        
+        # Convert to frequency domain
+        reverb_fft = np.fft.fft(reverb_audio, n=len(rir_padded))
+        rir_fft = np.fft.fft(rir_padded)
+        
+        # Wiener deconvolution with regularization
+        regularization = 0.01
+        rir_conj = np.conj(rir_fft)
+        rir_power = np.abs(rir_fft) ** 2
+        
+        # Wiener filter: H* / (|H|^2 + λ)
+        wiener_filter = rir_conj / (rir_power + regularization)
+        
+        # Apply filter
+        clean_fft = reverb_fft * wiener_filter
+        
+        # Convert back to time domain and trim to original length
+        dereverberated = np.real(np.fft.ifft(clean_fft))[:len(reverb_audio)]
+        
+        return dereverberated
+    
+    def _compute_speech_drr(self, audio: np.ndarray, sample_rate: int = 16000) -> float:
+        """
+        Compute DRR (Direct-to-Reverberant Ratio) on speech signal.
+        
+        Args:
+            audio: Speech signal
+            sample_rate: Sampling rate
+            
+        Returns:
+            DRR in dB
+        """
+        if len(audio) < sample_rate // 10:  # Less than 100ms
+            return -20.0
+        
+        # Frame-based analysis
+        frame_size = int(0.025 * sample_rate)  # 25ms frames
+        hop_size = int(0.01 * sample_rate)     # 10ms hop
+        
+        frames = []
+        for i in range(0, len(audio) - frame_size, hop_size):
+            frame = audio[i:i + frame_size]
+            frames.append(frame)
+        
+        if len(frames) < 5:
+            return -20.0
+        
+        # Compute frame energies
+        frame_energies = [np.sum(frame ** 2) for frame in frames]
+        
+        # Find direct sound (strongest frames in first 200ms)
+        max_direct_frames = min(20, len(frame_energies))  # First 200ms
+        direct_energy = np.max(frame_energies[:max_direct_frames])
+        
+        # Estimate reverberation energy (mean of remaining frames)
+        if len(frame_energies) > max_direct_frames:
+            reverb_frames = frame_energies[max_direct_frames:]
+            reverb_energy = np.mean(reverb_frames)
+        else:
+            reverb_energy = np.mean(frame_energies) * 0.1  # Assume 10% reverb
+        
+        # Compute DRR
+        drr_db = 10 * np.log10((direct_energy + 1e-12) / (reverb_energy + 1e-12))
+        
+        return float(drr_db)
+    
     def _encourage_reverberation(self, rir: np.ndarray) -> np.ndarray:
         """Actively modify RIR to have more realistic reverberation structure."""
         if len(rir) < 64:
@@ -396,7 +476,7 @@ class NeuralRIRAgent:
                       clean_audio: Optional[np.ndarray] = None,
                       sample_rate: int = 16000) -> float:
         """
-        Compute DRR-based reward for RIR estimate.
+        Compute DRR-based reward for RIR estimate by dereverbarating the speech.
         
         Args:
             rir: Current RIR estimate
@@ -407,8 +487,21 @@ class NeuralRIRAgent:
         Returns:
             Reward value
         """
-        # Primary reward: DRR (balanced for realistic rooms)
-        drr = compute_drr(rir, sample_rate)
+        # Apply estimated RIR to dereverb the speech and compute DRR on result
+        try:
+            # Use the estimated RIR to dereverberate the speech
+            from scipy import signal
+            
+            # Perform Wiener deconvolution to get dereverberated signal
+            # This is the key: use the RIR to actually dereverb the speech
+            dereverberated_audio = self._dereverberate_with_rir(reverb_audio, rir)
+            
+            # Compute DRR on the dereverberated audio (not on RIR itself!)
+            drr = self._compute_speech_drr(dereverberated_audio, sample_rate)
+            
+        except Exception as e:
+            # Fallback: heavily penalize if dereverberation fails
+            drr = -20.0
         
         # Normalize DRR to realistic room range (0-15 dB for typical rooms)
         if drr > 0:
@@ -606,7 +699,7 @@ class NeuralRIREnvironment:
         
         info = {
             'step': self.step_count,
-            'drr': compute_drr(self.current_rir, self.sample_rate),
+            'rir_metric': compute_rir_drr_metric(self.current_rir, self.sample_rate),  # RIR structural metric
             'rir_energy': np.sum(self.current_rir ** 2),
             'rir_peak': np.max(np.abs(self.current_rir))
         }
@@ -637,7 +730,7 @@ def compare_agents_demo():
     env = NeuralRIREnvironment(max_iterations=20)
     agent = NeuralRIRAgent(rir_length=1024, learning_rate=1e-3)
     
-    print(f"True RIR DRR: {compute_drr(true_rir, sample_rate):.2f} dB")
+    print(f"True RIR structural metric: {compute_rir_drr_metric(true_rir, sample_rate):.2f} dB")
     
     # Run training episode
     rir_estimates = []
@@ -665,21 +758,21 @@ def compare_agents_demo():
     
     # Final comparison
     final_rir = rir_estimates[-1]
-    final_drr = compute_drr(final_rir, sample_rate)
+    final_rir_metric = compute_rir_drr_metric(final_rir, sample_rate)
     
     # Simple correlation with true RIR
     min_len = min(len(final_rir), len(true_rir))
     correlation = np.corrcoef(final_rir[:min_len], true_rir[:min_len])[0, 1]
     
     print(f"\n=== Results ===")
-    print(f"Final DRR: {final_drr:.2f} dB (true: {compute_drr(true_rir, sample_rate):.2f} dB)")
+    print(f"Final RIR metric: {final_rir_metric:.2f} dB (true: {compute_rir_drr_metric(true_rir, sample_rate):.2f} dB)")
     print(f"RIR Correlation: {correlation:.3f}")
     print(f"Total Reward: {sum(rewards):.3f}")
     
     return {
         'rir_estimates': rir_estimates,
         'rewards': rewards,
-        'final_drr': final_drr,
+        'final_rir_metric': final_rir_metric,
         'correlation': correlation,
         'true_rir': true_rir
     }

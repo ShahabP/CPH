@@ -20,7 +20,7 @@ SRC_DIR = os.path.abspath(os.path.join(THIS_DIR, '..', 'src'))
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from neural_rir_agent import NeuralRIRAgent, NeuralRIREnvironment, compute_drr
+from neural_rir_agent import NeuralRIRAgent, NeuralRIREnvironment, compute_rir_drr_metric
 from rl_framework import RIREstimationEnv, DQNAgent
 from audio_processing import AudioProcessor
 
@@ -131,7 +131,7 @@ def run_dqn_agent(scenario: dict, episodes: int = 10, max_steps: int = 20):
         # Evaluate final RIR
         if hasattr(env, 'current_rir_estimate') and env.current_rir_estimate is not None:
             final_rir = env.current_rir_estimate
-            drr = compute_drr(final_rir)
+            drr = compute_rir_drr_metric(final_rir)
             min_len = min(len(final_rir), len(scenario['true_rir']))
             correlation = np.corrcoef(final_rir[:min_len], scenario['true_rir'][:min_len])[0, 1]
             if np.isnan(correlation):
@@ -184,7 +184,7 @@ def run_neural_agent(scenario: dict, episodes: int = 10, max_steps: int = 20):
         
         # Evaluate final RIR
         final_rir = env.current_rir
-        drr = compute_drr(final_rir)
+        drr = compute_rir_drr_metric(final_rir)
         min_len = min(len(final_rir), len(scenario['true_rir']))
         correlation = np.corrcoef(final_rir[:min_len], scenario['true_rir'][:min_len])[0, 1]
         if np.isnan(correlation):
@@ -277,7 +277,7 @@ def main():
     # Run comparison on each scenario
     for scenario in scenarios:
         print(f"\n=== {scenario['name']} ===")
-        print(f"True RIR DRR: {compute_drr(scenario['true_rir']):.2f} dB")
+        print(f"True RIR structural metric: {compute_rir_drr_metric(scenario['true_rir']):.2f} dB")
         
         # Run both agents
         dqn_results = run_dqn_agent(scenario, episodes=5, max_steps=15)

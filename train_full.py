@@ -33,7 +33,7 @@ from rl_framework import (
     DQNAgent,
     train_rir_agent,
 )  # type: ignore
-from neural_rir_agent import NeuralRIRAgent, NeuralRIREnvironment, compute_drr  # type: ignore
+from neural_rir_agent import NeuralRIRAgent, NeuralRIREnvironment, compute_rir_drr_metric  # type: ignore
 from audio_processing import AudioProcessor  # type: ignore
 from dereverberation import BlindDereverberation  # type: ignore
 from rir_estimation import DeconvolutionRIREstimator  # type: ignore

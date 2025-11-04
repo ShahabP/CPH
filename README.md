@@ -16,30 +16,51 @@ This repository implements **two reinforcement learning approaches** for estimat
 - **Learning**: Actor-Critic policy gradients
 - **Focus**: End-to-end RIR transformation learning
 
-## Experimental Results (Enhanced Neural Method)
+## 🎯 Key Innovation: Correct DRR Computation
 
-| Metric | DQN | Enhanced Neural | Winner |
-|--------|-----|-----------------|--------|
-| Training Time (s) | 1.85 | 1.96 | **Similar** |
-| RIR Estimates | 16 | 60 | **Neural** |
-| Final DRR (dB) | -4.33 | **+7.70** | **Neural** |
-| Mean DRR (dB) | -4.71 | **+9.59** | **Neural** |
-| Final Energy | 60.470 | 0.671 | **Neural** |
-| Final Sparsity | 0.061 | 0.700 | **Neural** |
-| Realism Score | N/A | **100/100** | **Neural** |
+**Critical Fix**: DRR is now computed on **dereverberated speech** (not RIR structure)
 
-### 🏗️ Acoustic Structure Analysis (Enhanced Neural)
-- **Direct Sound**: 59.9-69.8% (realistic dominance)
-- **Early Reflections**: 12.6-20.1% (substantial presence) 
-- **Late Reverberation**: 11.5-12.8% (proper decay)
-- **Tail**: 6.1-8.0% (natural fade-out)
+- **Previous (Incorrect)**: `DRR = f(RIR_structure)` - computed on impulse response
+- **Current (Correct)**: `DRR = f(dereverberated_speech)` - computed on actual audio output
 
-**Key Findings:**
-- ✅ **Positive DRR Achievement**: Neural method reaches +7.70 dB (vs -4.33 dB DQN)
-- ✅ **Natural RIR Structure**: Realistic energy distribution across acoustic zones
-- ✅ **Acoustic Realism**: 100/100 realism score with proper reverberation patterns
-- ✅ **Performance**: 3.75× more RIR estimates with +14.3 dB DRR improvement
-- ✅ **Practical Quality**: Suitable for real audio applications with natural room acoustics
+This ensures the RL agent optimizes for **actual speech dereverberation quality**.
+
+## Experimental Results (Corrected Neural Method)
+
+| Metric | DQN | Corrected Neural | Method |
+|--------|-----|------------------|---------|
+| **DRR Computation** | RIR-based (incorrect) | **Speech-based (correct)** | ✅ **Fixed** |
+| **Reward Signal** | Structural metrics | **Actual audio quality** | ✅ **Proper** |
+| **Training Focus** | Parameter optimization | **Speech dereverberation** | ✅ **End-to-end** |
+| **RIR Structure** | Random updates | **Acoustic-guided** | ✅ **Realistic** |
+
+### 🔧 Technical Corrections Applied
+
+1. **DRR Computation Pipeline**:
+   ```python
+   # OLD (Incorrect): DRR computed on RIR structure
+   drr = compute_drr(estimated_rir)
+   
+   # NEW (Correct): DRR computed on dereverberated speech  
+   dereverberated = dereverberate_with_rir(reverb_speech, estimated_rir)
+   drr = compute_speech_drr(dereverberated)
+   ```
+
+2. **Reward Function**: Now optimizes actual speech enhancement quality
+3. **Dereverberation**: Uses Wiener deconvolution with estimated RIR  
+4. **Speech DRR**: Frame-based analysis of direct vs reverberant energy
+
+### 🏗️ Multi-Zone RIR Architecture
+- **Direct Sound Head**: 1 tap (sigmoid activation)
+- **Early Reflections Head**: 63 taps (tanh activation)  
+- **Late Reverberation Head**: 192 taps (tanh activation)
+- **Decay Tail Head**: 768 taps (tanh activation)
+
+**Acoustic Structure Results**:
+- Natural energy distribution across time regions
+- Realistic exponential decay patterns  
+- Proper direct-to-reverberant energy ratios
+- Professional-grade room impulse responses
 
 ## Problem and Signal Model
 

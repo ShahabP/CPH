@@ -23,7 +23,7 @@ SRC_DIR = os.path.join(ROOT_DIR, 'src')
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from neural_rir_agent import compute_drr
+from neural_rir_agent import compute_rir_drr_metric
 
 
 def run_method(method: str, output_suffix: str = ""):
@@ -107,7 +107,7 @@ def analyze_rirs(rirs, method_name: str):
     
     for rir in rirs:
         # DRR
-        drr = compute_drr(rir)
+        drr = compute_rir_drr_metric(rir)
         drrs.append(drr if not np.isinf(drr) else 0)
         
         # Energy
@@ -203,12 +203,12 @@ def create_evolution_comparison(dqn_rirs, neural_rirs, output_path: Path):
     # Metrics comparison
     axes[0, 2].set_title("DRR Evolution Comparison")
     if dqn_rirs:
-        dqn_drrs = [compute_drr(r) for r in dqn_rirs]
+        dqn_drrs = [compute_rir_drr_metric(r) for r in dqn_rirs]
         dqn_drrs = [d if not np.isinf(d) else 0 for d in dqn_drrs]
         axes[0, 2].plot(dqn_drrs, 'b-', label='DQN', alpha=0.7)
     
     if neural_rirs:
-        neural_drrs = [compute_drr(r) for r in neural_rirs]
+        neural_drrs = [compute_rir_drr_metric(r) for r in neural_rirs]
         neural_drrs = [d if not np.isinf(d) else 0 for d in neural_drrs]
         axes[0, 2].plot(neural_drrs, 'r-', label='Neural', alpha=0.7)
     
