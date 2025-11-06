@@ -168,13 +168,3 @@ Core requirements:
 - `torch>=2.0.0` (for Neural RIR Agent)
 - `gymnasium>=0.29.1` (for RL environments)
 
-## References
-
-- P. A. Naylor and N. D. Gaubitch, "Speech Dereverberation," Springer
-- E. A. P. Habets, "Room Impulse Response (RIR) Generator"  
-- H. Erdogan et al., "Deep Learning-based Speech Dereverberation"
-- Z. Koldovsky et al., "Blind Deconvolution and Dereverberation of Speech"
-
-## Citation
-
-This work presents reinforcement learning approaches for room impulse response estimation with end-to-end speech enhancement optimization, achieving significant DRR improvements through neural policy networks and parameter optimization methods.
