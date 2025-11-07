@@ -220,84 +220,106 @@ def create_rir_evolution_plot(data_neural: Dict, data_dqn: Dict, save_path: str)
                 arrowprops=dict(arrowstyle='->', color='#E74C3C', alpha=0.7),
                 fontsize=10, color='#E74C3C', fontweight='bold')
     
-    # 2. Loss Functions Comparison (top right)
+    # 2. RIR Initialization Methods Comparison (top right)
     ax2 = fig.add_subplot(gs[0, 2])
-    ax2_twin = ax2.twinx()
+    
+    # Generate sample initializations
+    from rl_framework import RIREstimationEnv
+    env = RIREstimationEnv(rir_length=1024)
+    
+    # Random initialization
+    random_init = env._get_initial_rir_estimate(None, None, "random")
+    
+    # Exponential decay initialization  
+    exp_decay_init = env._get_exponential_decay_rir()
+    
+    time_ms = np.arange(len(random_init)) / 16  # 16kHz to ms
+    
+    ax2.plot(time_ms, random_init, 'r-', label='Random Init', linewidth=2, alpha=0.8)
+    ax2.plot(time_ms, exp_decay_init, 'b-', label='Exp Decay Init', linewidth=2, alpha=0.8)
+    ax2.set_xlabel('Time (ms)', fontsize=10)
+    ax2.set_ylabel('Amplitude', fontsize=10)
+    ax2.set_title('RIR Initialization Methods', fontsize=12, fontweight='bold')
+    ax2.legend(fontsize=9)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim(0, 64)  # Show first 64ms
+    
+    # Add initialization characteristics
+    ax2.annotate('Unbiased\nExploration', xy=(45, 0.05), xytext=(50, 0.15),
+                arrowprops=dict(arrowstyle='->', color='red', alpha=0.7),
+                fontsize=8, color='red')
+    ax2.annotate('Physically\nPlausible', xy=(20, 0.8), xytext=(25, 0.9),
+                arrowprops=dict(arrowstyle='->', color='blue', alpha=0.7),
+                fontsize=8, color='blue')
+    
+    # 3. Loss Functions Comparison (second row, left)
+    ax3 = fig.add_subplot(gs[1, 0])
+    ax3_twin = ax3.twinx()
     
     # Neural method losses
-    line1 = ax2.plot(data_neural['episodes'][::10], data_neural['policy_loss'][::10], 
+    line1 = ax3.plot(data_neural['episodes'][::10], data_neural['policy_loss'][::10], 
                      label='Policy Loss', color='#3498DB', linewidth=1.5)
-    line2 = ax2.plot(data_neural['episodes'][::10], data_neural['value_loss'][::10], 
+    line2 = ax3.plot(data_neural['episodes'][::10], data_neural['value_loss'][::10], 
                      label='Value Loss', color='#9B59B6', linewidth=1.5)
     
     # DQN losses on twin axis
-    line3 = ax2_twin.plot(data_dqn['episodes'][::10], data_dqn['q_loss'][::10], 
+    line3 = ax3_twin.plot(data_dqn['episodes'][::10], data_dqn['q_loss'][::10], 
                           label='Q-Loss (DQN)', color='#E67E22', linewidth=1.5, linestyle='--')
     
-    ax2.set_xlabel('Episodes', fontsize=10)
-    ax2.set_ylabel('Neural Method Loss', fontsize=10, color='#3498DB')
-    ax2_twin.set_ylabel('DQN Method Loss', fontsize=10, color='#E67E22')
-    ax2.set_title('Training Loss Evolution', fontsize=12, fontweight='bold')
+    ax3.set_xlabel('Episodes', fontsize=10)
+    ax3.set_ylabel('Neural Method Loss', fontsize=10, color='#3498DB')
+    ax3_twin.set_ylabel('DQN Method Loss', fontsize=10, color='#E67E22')
+    ax3.set_title('Training Loss Evolution', fontsize=12, fontweight='bold')
     
     # Combine legends
     lines = line1 + line2 + line3
     labels = [l.get_label() for l in lines]
-    ax2.legend(lines, labels, loc='upper right', fontsize=9)
-    ax2.grid(True, alpha=0.3)
-    
-    # 3. Neural Method: Multi-Zone Evolution (second row, left)
-    ax3 = fig.add_subplot(gs[1, 0])
-    ax3.plot(data_neural['episodes'], data_neural['direct_energy'], 
-             label='Direct Sound', linewidth=2, color='#E74C3C')
-    ax3.plot(data_neural['episodes'], data_neural['early_energy'], 
-             label='Early Reflections', linewidth=2, color='#F39C12')
-    ax3.plot(data_neural['episodes'], data_neural['late_energy'], 
-             label='Late Reverberation', linewidth=2, color='#27AE60')
-    ax3.plot(data_neural['episodes'], data_neural['tail_decay'], 
-             label='Tail Decay', linewidth=2, color='#8E44AD')
-    
-    ax3.set_xlabel('Episodes', fontsize=10)
-    ax3.set_ylabel('Energy Level', fontsize=10)
-    ax3.set_title('Neural: Multi-Zone RIR Components', fontsize=12, fontweight='bold')
-    ax3.legend(fontsize=9)
+    ax3.legend(lines, labels, loc='upper right', fontsize=9)
     ax3.grid(True, alpha=0.3)
     
-    # 4. DQN Method: Acoustic Parameters (second row, middle)
+    # 4. Neural Method: Multi-Zone Evolution (second row, middle)
     ax4 = fig.add_subplot(gs[1, 1])
-    ax4_twin = ax4.twinx()
+    ax4.plot(data_neural['episodes'], data_neural['direct_energy'], 
+             label='Direct Sound', linewidth=2, color='#E74C3C')
+    ax4.plot(data_neural['episodes'], data_neural['early_energy'], 
+             label='Early Reflections', linewidth=2, color='#F39C12')
+    ax4.plot(data_neural['episodes'], data_neural['late_energy'], 
+             label='Late Reverberation', linewidth=2, color='#27AE60')
+    ax4.plot(data_neural['episodes'], data_neural['tail_decay'], 
+             label='Tail Decay', linewidth=2, color='#8E44AD')
+    
+    ax4.set_xlabel('Episodes', fontsize=10)
+    ax4.set_ylabel('Energy Level', fontsize=10)
+    ax4.set_title('Neural: Multi-Zone RIR Components', fontsize=12, fontweight='bold')
+    ax4.legend(fontsize=9)
+    ax4.grid(True, alpha=0.3)
+    
+    # 5. DQN Method: Acoustic Parameters (second row, right)
+    ax5 = fig.add_subplot(gs[1, 2])
+    ax5_twin = ax5.twinx()
     
     # Primary axis: RT60, EDT
-    line1 = ax4.plot(data_dqn['episodes'], data_dqn['t60_values'], 
+    line1 = ax5.plot(data_dqn['episodes'], data_dqn['t60_values'], 
                      label='RT60 (s)', color='#3498DB', linewidth=2)
-    line2 = ax4.plot(data_dqn['episodes'], data_dqn['edt_values'], 
+    line2 = ax5.plot(data_dqn['episodes'], data_dqn['edt_values'], 
                      label='EDT (s)', color='#E67E22', linewidth=2)
     
     # Secondary axis: C50, D50
-    line3 = ax4_twin.plot(data_dqn['episodes'], data_dqn['c50_values'], 
+    line3 = ax5_twin.plot(data_dqn['episodes'], data_dqn['c50_values'], 
                           label='C50 (dB)', color='#27AE60', linewidth=2, linestyle='--')
-    line4 = ax4_twin.plot(data_dqn['episodes'], data_dqn['d50_values'], 
+    line4 = ax5_twin.plot(data_dqn['episodes'], data_dqn['d50_values'], 
                           label='D50', color='#8E44AD', linewidth=2, linestyle='--')
     
-    ax4.set_xlabel('Episodes', fontsize=10)
-    ax4.set_ylabel('Time Parameters (s)', fontsize=10)
-    ax4_twin.set_ylabel('Clarity Parameters', fontsize=10)
-    ax4.set_title('DQN: Acoustic Parameter Evolution', fontsize=12, fontweight='bold')
+    ax5.set_xlabel('Episodes', fontsize=10)
+    ax5.set_ylabel('Time Parameters (s)', fontsize=10)
+    ax5_twin.set_ylabel('Clarity Parameters', fontsize=10)
+    ax5.set_title('DQN: Acoustic Parameter Evolution', fontsize=12, fontweight='bold')
     
     # Combine legends
     lines = line1 + line2 + line3 + line4
     labels = [l.get_label() for l in lines]
-    ax4.legend(lines, labels, loc='center right', fontsize=9)
-    ax4.grid(True, alpha=0.3)
-    
-    # 5. DQN Exploration Strategy (second row, right)
-    ax5 = fig.add_subplot(gs[1, 2])
-    ax5.plot(data_dqn['episodes'], data_dqn['epsilon'], 
-             color='#E74C3C', linewidth=2, label='ε-greedy')
-    ax5.set_xlabel('Episodes', fontsize=10)
-    ax5.set_ylabel('Exploration Rate (ε)', fontsize=10)
-    ax5.set_title('DQN: Exploration Strategy', fontsize=12, fontweight='bold')
+    ax5.legend(lines, labels, loc='center right', fontsize=9)
     ax5.grid(True, alpha=0.3)
-    ax5.legend(fontsize=9)
     
     # 6. RIR Evolution Heat Maps (bottom two rows)
     

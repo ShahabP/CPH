@@ -47,7 +47,8 @@ class RIREstimationEnv(gym.Env):
                  max_iterations: int = 10,
                  rir_length: int = 1024,
                  feature_dim: int = 513,
-                 action_space_type: str = 'continuous'):
+                 action_space_type: str = 'continuous',
+                 rir_init_method: str = 'random'):
         """
         Initialize RIR estimation environment.
         
@@ -56,12 +57,14 @@ class RIREstimationEnv(gym.Env):
             rir_length: Length of RIR to estimate
             feature_dim: Dimension of audio features
             action_space_type: Type of action space ('continuous' or 'discrete')
+            rir_init_method: RIR initialization method ('random' or 'exponential_decay')
         """
         super().__init__()
         
         self.max_iterations = max_iterations
         self.rir_length = rir_length
         self.feature_dim = feature_dim
+        self.rir_init_method = rir_init_method
         
         # State space: [reverb_features, dereverb_features, current_rir, metrics]
         state_dim = 2 * feature_dim + rir_length + 10  # +10 for metrics
@@ -131,7 +134,7 @@ class RIREstimationEnv(gym.Env):
         if self.global_rir_estimate is not None:
             initial_rir = self.global_rir_estimate.copy()
         else:
-            initial_rir = self._get_initial_rir_estimate(self.reverb_audio, initial_dereverb)
+            initial_rir = self._get_initial_rir_estimate(self.reverb_audio, initial_dereverb, self.rir_init_method)
         
         # Compute initial quality metrics
         initial_metrics = self._compute_quality_metrics(initial_rir)
@@ -257,10 +260,56 @@ class RIREstimationEnv(gym.Env):
         return audio * 0.8  # Simple scaling as placeholder
     
     def _get_initial_rir_estimate(self, reverb_audio: np.ndarray, 
-                                 clean_audio: np.ndarray) -> np.ndarray:
-        """Get initial RIR estimate."""
-        # Placeholder: random initial estimate
-        return np.random.normal(0, 0.1, self.rir_length)
+                                 clean_audio: np.ndarray,
+                                 init_method: str = "random") -> np.ndarray:
+        """Get initial RIR estimate using specified method.
+        
+        Args:
+            reverb_audio: Reverberant audio signal
+            clean_audio: Clean audio signal (if available)
+            init_method: Initialization method ("random" or "exponential_decay")
+            
+        Returns:
+            Initial RIR estimate
+        """
+        if init_method == "exponential_decay":
+            return self._get_exponential_decay_rir()
+        else:  # default to random
+            return np.random.normal(0, 0.1, self.rir_length)
+    
+    def _get_exponential_decay_rir(self) -> np.ndarray:
+        """Generate exponential decay RIR initialization.
+        
+        Creates a physically plausible RIR with:
+        - Strong direct sound at t=0
+        - Exponential decay following typical room acoustics
+        - Realistic decay constants for early and late reflections
+        """
+        rir = np.zeros(self.rir_length)
+        
+        # Direct sound (strong impulse at t=0)
+        rir[0] = 1.0
+        
+        # Early reflections (first 200 samples ~12.5ms)
+        early_decay = 200  # samples
+        for i in range(1, min(early_decay, self.rir_length)):
+            # Add some early reflections with decreasing amplitude
+            reflection_strength = 0.3 * np.exp(-i / 100)  # Fast initial decay
+            if np.random.random() < 0.1:  # Sparse early reflections
+                rir[i] += reflection_strength * (0.5 + np.random.random())
+        
+        # Late reverberation (exponential tail)
+        for i in range(early_decay, self.rir_length):
+            # Exponential decay with realistic RT60 characteristics
+            decay_rate = 50  # samples (faster decay = shorter RT60)
+            amplitude = 0.1 * np.exp(-i / decay_rate)
+            rir[i] = amplitude * (0.8 + 0.4 * np.random.random())  # Add some variation
+        
+        # Normalize to ensure direct sound is prominent
+        if np.max(np.abs(rir)) > 0:
+            rir = rir / np.max(np.abs(rir))
+        
+        return rir
     
     def _compute_quality_metrics(self, rir_estimate: np.ndarray) -> Dict[str, float]:
         """Compute RIR quality metrics."""

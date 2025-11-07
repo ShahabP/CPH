@@ -161,9 +161,9 @@ def create_detailed_rir_heatmaps(save_path: str):
     neural_data = generate_detailed_rir_evolution('neural', 1000)
     dqn_data = generate_detailed_rir_evolution('dqn', 1000)
     
-    # Create figure with custom layout
-    fig = plt.figure(figsize=(20, 14))
-    gs = fig.add_gridspec(3, 4, hspace=0.3, wspace=0.3, height_ratios=[1, 1, 0.8])
+    # Create figure with custom layout - modified for separate RIR plots
+    fig = plt.figure(figsize=(20, 16))
+    gs = fig.add_gridspec(4, 4, hspace=0.3, wspace=0.3, height_ratios=[1, 1, 0.8, 0.6])
     
     fig.suptitle('Detailed RIR Evolution Heat Map Analysis', fontsize=18, fontweight='bold')
     
@@ -301,7 +301,7 @@ def create_detailed_rir_heatmaps(save_path: str):
     ax6.legend()
     ax6.grid(True, alpha=0.3)
     
-    # 7. Difference Analysis (bottom row)
+    # 7. Difference Analysis (third row, spans 2 columns)
     ax7 = fig.add_subplot(gs[2, :2])
     
     # Align matrices and compute difference
@@ -324,36 +324,84 @@ def create_detailed_rir_heatmaps(save_path: str):
     cbar7 = plt.colorbar(im7, ax=ax7, shrink=0.8)
     cbar7.set_label('Amplitude Difference', fontsize=12)
     
-    # 8. Final RIR Comparison (bottom right)
-    ax8 = fig.add_subplot(gs[2, 2:])
+    # 8. Final Neural RIR (bottom left)
+    ax8 = fig.add_subplot(gs[3, :2])
     
-    # Plot final RIRs from both methods
+    # Plot Neural method final RIR
     time_axis = np.arange(1024) * 1000 / 16000  # Convert to milliseconds
+    neural_final_rir = neural_data['rir_snapshots'][-1]
     
-    ax8.plot(time_axis, neural_data['rir_snapshots'][-1], 
-             label='Neural RIR Agent', linewidth=2, color='#2E86C1', alpha=0.8)
-    ax8.plot(time_axis, dqn_data['rir_snapshots'][-1], 
-             label='DQN Parameter Opt', linewidth=2, color='#E74C3C', alpha=0.8)
+    ax8.plot(time_axis, neural_final_rir, linewidth=2, color='#2E86C1', alpha=0.9)
+    ax8.fill_between(time_axis, 0, neural_final_rir, alpha=0.3, color='#2E86C1')
     
-    ax8.set_title('Final RIR Comparison (Episode 1000)', fontsize=14, fontweight='bold')
+    ax8.set_title('Final Neural RIR Agent (Episode 1000)', fontsize=14, fontweight='bold', color='#2E86C1')
     ax8.set_xlabel('Time (ms)')
     ax8.set_ylabel('Amplitude')
-    ax8.legend()
     ax8.grid(True, alpha=0.3)
     ax8.set_xlim(0, 64)  # First 64ms
     
-    # Add annotations for key differences
-    ax8.annotate('Sharper Direct Sound\n(Neural)', 
-                xy=(4, neural_data['rir_snapshots'][-1][64]), 
-                xytext=(10, 0.5),
-                arrowprops=dict(arrowstyle='->', color='#2E86C1', alpha=0.7),
-                fontsize=10, color='#2E86C1')
+    # Add zone annotations for Neural method
+    ax8.axvline(x=4, color='yellow', linestyle='--', alpha=0.7, linewidth=1, label='Direct Sound')
+    ax8.axvline(x=24, color='orange', linestyle='--', alpha=0.7, linewidth=1, label='Early Reflections')
+    ax8.axvline(x=44, color='green', linestyle='--', alpha=0.7, linewidth=1, label='Late Reverberation')
+    ax8.legend(loc='upper right', fontsize=10)
     
-    ax8.annotate('More Structured\nReflections (Neural)',
-                xy=(15, np.max(neural_data['rir_snapshots'][-1][200:400])),
-                xytext=(25, 0.3),
-                arrowprops=dict(arrowstyle='->', color='#2E86C1', alpha=0.7),
-                fontsize=10, color='#2E86C1')
+    # Highlight key features
+    direct_peak_idx = np.argmax(np.abs(neural_final_rir[50:80])) + 50
+    direct_peak_time = direct_peak_idx * 1000 / 16000
+    ax8.annotate('Sharp Direct Sound', 
+                xy=(direct_peak_time, neural_final_rir[direct_peak_idx]), 
+                xytext=(direct_peak_time + 10, neural_final_rir[direct_peak_idx] + 0.2),
+                arrowprops=dict(arrowstyle='->', color='#2E86C1', alpha=0.8),
+                fontsize=10, color='#2E86C1', fontweight='bold')
+    
+    # 9. Final DQN RIR (bottom right)
+    ax9 = fig.add_subplot(gs[3, 2:])
+    
+    # Plot DQN method final RIR
+    dqn_final_rir = dqn_data['rir_snapshots'][-1]
+    
+    ax9.plot(time_axis, dqn_final_rir, linewidth=2, color='#E74C3C', alpha=0.9)
+    ax9.fill_between(time_axis, 0, dqn_final_rir, alpha=0.3, color='#E74C3C')
+    
+    ax9.set_title('Final DQN Parameter Optimization (Episode 1000)', fontsize=14, fontweight='bold', color='#E74C3C')
+    ax9.set_xlabel('Time (ms)')
+    ax9.set_ylabel('Amplitude')
+    ax9.grid(True, alpha=0.3)
+    ax9.set_xlim(0, 64)  # First 64ms
+    
+    # Add parametric model annotations
+    ax9.axvline(x=4, color='yellow', linestyle='--', alpha=0.7, linewidth=1, label='Direct Path')
+    ax9.axvline(x=18.75, color='cyan', linestyle='--', alpha=0.7, linewidth=1, label='Image Sources')
+    ax9.axvline(x=37.5, color='magenta', linestyle='--', alpha=0.7, linewidth=1, label='Decay Tail')
+    ax9.legend(loc='upper right', fontsize=10)
+    
+    # Highlight parametric features
+    dqn_direct_idx = np.argmax(np.abs(dqn_final_rir[50:80])) + 50
+    dqn_direct_time = dqn_direct_idx * 1000 / 16000
+    ax9.annotate('Parametric Structure', 
+                xy=(dqn_direct_time, dqn_final_rir[dqn_direct_idx]), 
+                xytext=(dqn_direct_time + 10, dqn_final_rir[dqn_direct_idx] + 0.15),
+                arrowprops=dict(arrowstyle='->', color='#E74C3C', alpha=0.8),
+                fontsize=10, color='#E74C3C', fontweight='bold')
+    
+    # Add performance comparison text box
+    performance_text = (
+        'Performance Comparison:\n'
+        f'Neural: +7.67 dB DRR\n'
+        f'DQN: +3.24 dB DRR\n'
+        '\n'
+        'Key Differences:\n'
+        '• Neural: Sharper direct sound\n'
+        '• Neural: More structured reflections\n'
+        '• DQN: Smoother parametric model\n'
+        '• DQN: More distributed energy'
+    )
+    
+    # Place text box between the two RIR plots
+    fig.text(0.02, 0.02, performance_text, fontsize=10, 
+            bbox=dict(boxstyle="round,pad=0.5", facecolor='lightgray', alpha=0.8),
+            verticalalignment='bottom')
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
