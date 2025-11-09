@@ -586,6 +586,41 @@ class NeuralRIRAgent:
         """Store reward for current step."""
         self.episode_rewards.append(reward)
     
+    def _get_exponential_decay_rir(self, rir_length: int) -> np.ndarray:
+        """
+        Generate exponential decay RIR initialization.
+        
+        Creates a physically plausible RIR with:
+        - Strong direct sound at t=0
+        - Exponential decay following typical room acoustics
+        - Realistic decay constants for early and late reflections
+        """
+        rir = np.zeros(rir_length)
+        
+        # Direct sound (strong impulse at t=0)
+        rir[0] = 1.0
+        
+        # Early reflections (first 200 samples ~12.5ms at 16kHz)
+        early_decay = 200
+        for i in range(1, min(early_decay, rir_length)):
+            # Add some early reflections with decreasing amplitude
+            reflection_strength = 0.3 * np.exp(-i / 100)
+            if np.random.random() < 0.1:  # Sparse early reflections
+                rir[i] += reflection_strength * (0.5 + np.random.random())
+        
+        # Late reverberation (exponential tail)
+        for i in range(early_decay, rir_length):
+            # Exponential decay with realistic RT60 characteristics
+            decay_rate = 50  # samples (faster decay = shorter RT60)
+            amplitude = 0.1 * np.exp(-i / decay_rate)
+            rir[i] = amplitude * (0.8 + 0.4 * np.random.random())
+        
+        # Normalize to ensure direct sound is prominent
+        if np.max(np.abs(rir)) > 0:
+            rir = rir / np.max(np.abs(rir))
+        
+        return rir
+    
     def end_episode(self):
         """End episode and perform learning update."""
         if len(self.episode_rewards) == 0:
