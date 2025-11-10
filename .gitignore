@@ -16,6 +16,9 @@ env/
 
 # Data and experiments
 experiments/
+!experiments/all_combinations/
+!experiments/all_combinations/README.md
+!experiments/all_combinations/summary.json
 data/stream/
 data/**/*.wav
 *.npy
