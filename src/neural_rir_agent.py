@@ -90,7 +90,7 @@ class RIRPolicyNetwork(nn.Module):
     4. Batch normalization for stable gradients
     """
     
-    def __init__(self, rir_length: int = 1024, hidden_dim: int = 768):
+    def __init__(self, rir_length: int = 6400, hidden_dim: int = 768):
         super().__init__()
         self.rir_length = rir_length
         
@@ -213,7 +213,7 @@ class RIRPolicyNetwork(nn.Module):
 class NeuralRIRAgent:
     """Agent that directly updates RIR using neural policy with DRR rewards."""
     
-    def __init__(self, rir_length: int = 1024, learning_rate: float = 3e-4,
+    def __init__(self, rir_length: int = 6400, learning_rate: float = 3e-4,
                  gamma: float = 0.95, update_scale: float = 0.05):
         self.rir_length = rir_length
         self.gamma = gamma
@@ -694,7 +694,7 @@ class NeuralRIRAgent:
 class NeuralRIREnvironment:
     """Environment for neural RIR policy training."""
     
-    def __init__(self, max_iterations: int = 20, rir_length: int = 1024,
+    def __init__(self, max_iterations: int = 20, rir_length: int = 6400,
                  sample_rate: int = 16000):
         self.max_iterations = max_iterations
         self.rir_length = rir_length
@@ -775,7 +775,7 @@ def compare_agents_demo():
     
     # Initialize environment and agent
     env = NeuralRIREnvironment(max_iterations=20)
-    agent = NeuralRIRAgent(rir_length=1024, learning_rate=1e-3)
+    agent = NeuralRIRAgent(rir_length=env.rir_length, learning_rate=1e-3)
     
     print(f"True RIR structural metric: {compute_rir_drr_metric(true_rir, sample_rate):.2f} dB")
     

@@ -18,6 +18,20 @@ Purpose: explain the approaches and initialization choices so experiments can be
 
 - Exponential-decay: seed the RIR with a direct impulse plus an exponentially decaying tail and sparse early reflections. Provides a strong acoustic prior (direct path + decay) and typically helps convergence and final quality.
 
+## RIR length (note)
+
+There are two RIR-length defaults in the codebase and they are intentionally or historically different:
+
+- Environment default: `RIREstimationEnv` uses `rir_length=6400` (≈400 ms at 16 kHz). This value is used by the main RL environment and many training scripts.
+- Neural policy default: `NeuralRIRAgent` / `RIRPolicyNetwork` are implemented for `rir_length=1024` by default (smaller model size / faster prototyping).
+
+Recommendation: prefer a single canonical RIR length for your experiments (e.g., 6400 samples for realistic room tails). To unify:
+
+- Option A (use 6400 everywhere): update `NeuralRIRAgent(rir_length=6400)` and any network input shapes; increase model capacity or adjust batch sizes as needed.
+- Option B (use 1024 everywhere): set `RIREstimationEnv(rir_length=1024)` and adapt synthetic-data generation accordingly (shorter tails).
+
+Both options are supported by the code with small edits; pick the one that balances realism and runtime for your tests.
+
 ## Reproducing experiments
 
 Run the orchestrator (virtualenv example):
@@ -63,3 +77,48 @@ Below are concise, implementation-aligned descriptions of each method: the agent
 | Neural | Neural policy (`NeuralRIRAgent`) | Continuous RIR update vector (full length) | Deterministic NN output + exploration noise; actor-critic updates | DRR-based reward on dereverberated speech + structure penalties (direct/early/late/tail) | Policy-gradient style: actor loss (advantage-weighted), critic MSE; Adam, scheduler |
 
 If you'd like, I can integrate this table and the per-method descriptions into the top-level `README.md` as well, or add a one-line quick-test example below to show the exact command for a single-agent smoke test.
+
+## Episode flow, counts, and metrics
+
+What happens during one episode
+- Environment reset: each episode begins with `env.reset()` which either generates or loads a short synthetic reverberant speech segment together with a "true" RIR (used for metrics). The environment also initializes the current RIR estimate according to the chosen initialization method (random noise or exponential-decay prior).
+
+- Per-step loop (QN / DQN): for up to `max_steps` (15 in the orchestrator) the agent:
+	1. Observes the environment state (audio features + current RIR estimate + small metrics vector).
+	2. Selects an action: QN/DQN choose a discrete action index; that index is mapped to a 6‑D continuous parameter vector (alpha, beta, regularization, step_size, w1, w2) which the environment uses to run its dereverberation / RIR estimation step.
+	3. The environment applies the action, returns the next observation, a scalar reward, a termination flag, and info metrics.
+	4. The agent stores the transition and (DQN) may sample from its replay buffer to update the Q-network; QN updates its Q-table immediately.
+	5. If terminated (or max steps), the episode ends; epsilon is decayed for exploration.
+
+- Per-step loop (Neural RIR Agent): for up to `max_iterations` (15 in the orchestrator) the neural agent:
+	1. Receives the current RIR estimate as state and predicts a full-length RIR update vector (structured via direct/early/late/tail heads).
+	2. The environment applies the update (with momentum and enforcement of a dry-structure), computes a DRR-based reward by dereverberating the speech with the new RIR, and returns observation/reward/info.
+	3. The agent stores (state, action, value, reward) pairs and, at episode end, computes discounted returns and performs an actor-critic style update (actor loss + critic MSE).
+
+How many episodes are run
+- Per the orchestrator (`scripts/train_all_combinations.py`) the default counts used in the sweep are:
+	- QN: 300 episodes per QN combination
+	- DQN: 300 episodes per DQN combination
+	- Neural: 200 episodes per Neural combination
+
+- There are 6 method combinations (QN/DQN/Neural × Random/Exponential-decay). The script also sweeps 6 RT60 values (100, 300, 500, 700, 900, 1000 ms). For a single RT60 the total episodes are:
+	- QN: 2 combinations × 300 = 600 episodes
+	- DQN: 2 combinations × 300 = 600 episodes
+	- Neural: 2 combinations × 200 = 400 episodes
+	- Total per RT60 = 1,600 episodes
+
+- Full sweep across the six RT60 values therefore runs 1,600 × 6 = 9,600 episodes (this is the full-batch run used to produce the earlier aggregated results; run times will scale accordingly).
+
+What "correlation" means
+- When the code reports `correlation` it is the Pearson correlation coefficient between the estimated RIR and the ground-truth RIR (computed over the overlapping length). It ranges from -1 (perfect inverse) to +1 (perfect match), with 0 meaning no linear correlation. The code computes it with NumPy's `np.corrcoef` on the two vectors and stores the [0,1] element.
+
+What "average reward" means
+- The `avg_reward` shown in the summaries is the mean of the episode total rewards taken over the final window of training (the code uses the last 50 episodes when available). The per-episode total reward equals the sum of the per-step rewards emitted by the environment during that episode.
+
+- Environment reward (QN/DQN): the environment's reward function combines structural RIR metrics (correlation with ground truth when available, MSE penalty), peak/energy based rewards, and an improvement bonus across iterations. See `RIREstimationEnv._compute_reward` in the code for the exact composition.
+
+- Neural agent reward: the neural agent uses a DRR-focused reward computed by dereverberating the speech using the current RIR estimate and computing a speech-based DRR metric (`_compute_speech_drr`). Positive (dryer) DRR yields strong positive reward; additional terms reward a strong direct tap and penalize early/late/tail energy and slow decay (see `NeuralRIRAgent.compute_reward`).
+
+Notes on interpretation
+- Correlation is a direct structural match between estimated and true RIRs — it is useful for RIR recovery evaluation but does not directly reflect perceptual dereverberation quality.
+- Average reward is the algorithm's internal performance signal (aggregated across episodes) and combines many signals; improvements in `avg_reward` usually indicate the agent is learning policies that produce cleaner/drier dereverberation outputs under the chosen metric.
