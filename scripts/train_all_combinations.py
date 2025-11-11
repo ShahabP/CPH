@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 from src.rl_framework import RIREstimationEnv
 from src.rl_framework.qn_agent import QNAgent, train_qn_agent
 from src.rl_framework.dqn_agent import DQNAgent, train_dqn_agent
-from src.neural_rir_agent import NeuralRIRAgent, NeuralRIREnvironment
+from src.neural_rir_agent import NeuralRIRAgent, NeuralRIREnvironment, compute_rir_drr_metric
 
 
 def create_results_dir() -> Path:
@@ -35,7 +35,8 @@ def create_results_dir() -> Path:
     return results_dir
 
 
-def train_qn_combination(init_method: str, episodes: int = 500) -> Dict:
+def train_qn_combination(init_method: str, episodes: int = 500,
+                         rir_length: int = 6400, rt60_ms: float = 400.0) -> Dict:
     """
     Train Q-Learning agent with specified initialization.
     
@@ -53,10 +54,11 @@ def train_qn_combination(init_method: str, episodes: int = 500) -> Dict:
     # Create environment
     env = RIREstimationEnv(
         max_iterations=15,
-        rir_length=1024,
+        rir_length=rir_length,
         feature_dim=513,
         action_space_type='continuous',
-        rir_init_method=init_method
+        rir_init_method=init_method,
+        rt60_ms=rt60_ms
     )
     
     # Create agent
@@ -82,6 +84,14 @@ def train_qn_combination(init_method: str, episodes: int = 500) -> Dict:
     
     # Train
     training_stats = train_qn_agent(env, agent, episodes=episodes, max_steps=15, verbose=True)
+
+    # Compute structural DRR on final RIR estimate (RIR-based DRR metric)
+    sample_rate = 16000
+    try:
+        final_rir_est = env.current_state.current_rir_estimate
+        structural_drr = compute_rir_drr_metric(final_rir_est, sample_rate=sample_rate)
+    except Exception:
+        structural_drr = None
     
     # Extract metrics
     results = {
@@ -90,18 +100,21 @@ def train_qn_combination(init_method: str, episodes: int = 500) -> Dict:
         'episodes': episodes,
         'training_stats': training_stats,
         'final_stats': agent.get_stats(),
+        'final_rir': final_rir_est,  # Save the final RIR
         'final_metrics': {
             'avg_reward': np.mean([s['total_reward'] for s in training_stats[-50:]]),
             'avg_correlation': np.mean([s['final_metrics'].get('correlation', 0.0) 
                                        for s in training_stats[-50:]]),
-            'avg_steps': np.mean([s['steps'] for s in training_stats[-50:]])
+            'avg_steps': np.mean([s['steps'] for s in training_stats[-50:]]),
+            'structural_drr': structural_drr
         }
     }
     
     return results
 
 
-def train_dqn_combination(init_method: str, episodes: int = 500) -> Dict:
+def train_dqn_combination(init_method: str, episodes: int = 500,
+                          rir_length: int = 6400, rt60_ms: float = 400.0) -> Dict:
     """
     Train DQN agent with specified initialization.
     
@@ -119,10 +132,11 @@ def train_dqn_combination(init_method: str, episodes: int = 500) -> Dict:
     # Create environment
     env = RIREstimationEnv(
         max_iterations=15,
-        rir_length=1024,
+        rir_length=rir_length,
         feature_dim=513,
         action_space_type='continuous',
-        rir_init_method=init_method
+        rir_init_method=init_method,
+        rt60_ms=rt60_ms
     )
     
     # Create agent
@@ -142,6 +156,14 @@ def train_dqn_combination(init_method: str, episodes: int = 500) -> Dict:
     
     # Train
     training_stats = train_dqn_agent(env, agent, episodes=episodes, max_steps=15, verbose=True)
+
+    # Structural DRR on final RIR
+    sample_rate = 16000
+    try:
+        final_rir_est = env.current_state.current_rir_estimate
+        structural_drr = compute_rir_drr_metric(final_rir_est, sample_rate=sample_rate)
+    except Exception:
+        structural_drr = None
     
     # Extract metrics
     results = {
@@ -150,19 +172,22 @@ def train_dqn_combination(init_method: str, episodes: int = 500) -> Dict:
         'episodes': episodes,
         'training_stats': training_stats,
         'final_stats': agent.get_stats(),
+        'final_rir': final_rir_est,  # Save the final RIR
         'final_metrics': {
             'avg_reward': np.mean([s['total_reward'] for s in training_stats[-50:]]),
             'avg_correlation': np.mean([s['final_metrics'].get('correlation', 0.0) 
                                        for s in training_stats[-50:]]),
             'avg_steps': np.mean([s['steps'] for s in training_stats[-50:]]),
-            'avg_loss': np.mean([s['avg_loss'] for s in training_stats[-50:]])
+            'avg_loss': np.mean([s['avg_loss'] for s in training_stats[-50:]]),
+            'structural_drr': structural_drr
         }
     }
     
     return results
 
 
-def train_neural_combination(init_method: str, episodes: int = 500) -> Dict:
+def train_neural_combination(init_method: str, episodes: int = 500,
+                             rir_length: int = 6400, rt60_ms: float = 400.0) -> Dict:
     """
     Train Neural RIR agent with specified initialization.
     
@@ -179,7 +204,7 @@ def train_neural_combination(init_method: str, episodes: int = 500) -> Dict:
     
     # Create agent
     agent = NeuralRIRAgent(
-        rir_length=1024,
+        rir_length=rir_length,
         learning_rate=3e-4,
         gamma=0.95,
         update_scale=0.05
@@ -199,31 +224,28 @@ def train_neural_combination(init_method: str, episodes: int = 500) -> Dict:
         ], axis=0)
         
         # Generate true RIR based on initialization method
-        true_rir = np.zeros(1024)
+        true_rir = np.zeros(rir_length)
         if init_method == 'exponential_decay':
             # Exponential decay initialization
             true_rir[0] = 1.0
-            for i in range(1, min(200, len(true_rir))):
-                if np.random.random() < 0.1:  # Sparse early reflections
-                    true_rir[i] = 0.3 * np.exp(-i / 100) * (0.5 + np.random.random())
-            for i in range(200, len(true_rir)):
-                true_rir[i] = 0.1 * np.exp(-i / 50) * (0.8 + 0.4 * np.random.random())
+            # Use agent helper to create RT60-aware exponential RIR
+            true_rir = agent._get_exponential_decay_rir(rir_length, rt60_ms)
         else:
             # Random-like but still realistic for ground truth
             true_rir[0] = 1.0
-            for i in range(1, 200):
+            for i in range(1, min(200, rir_length)):
                 true_rir[i] = np.random.uniform(0, 0.3) * np.exp(-i / 80)
         
         reverb = np.convolve(clean, true_rir, mode='same')
         
         # Initialize RIR based on method
         if init_method == 'exponential_decay':
-            initial_rir = agent._get_exponential_decay_rir(1024)
+            initial_rir = agent._get_exponential_decay_rir(rir_length, rt60_ms)
         else:
-            initial_rir = np.random.normal(0, 0.1, 1024)
-        
+            initial_rir = np.random.normal(0, 0.1, rir_length)
+
         # Create environment and reset
-        env = NeuralRIREnvironment(max_iterations=15, sample_rate=sample_rate)
+        env = NeuralRIREnvironment(max_iterations=15, sample_rate=sample_rate, rir_length=rir_length)
         env.reset(reverb, clean, initial_rir=initial_rir)
         
         # Run episode
@@ -236,14 +258,14 @@ def train_neural_combination(init_method: str, episodes: int = 500) -> Dict:
         
         # Train agent at end of episode
         train_info = agent.end_episode()
-        
+
         # Compute correlation with true RIR
         final_rir = rir_state
         min_len = min(len(final_rir), len(true_rir))
         correlation = np.corrcoef(final_rir[:min_len], true_rir[:min_len])[0, 1]
         if np.isnan(correlation):
             correlation = 0.0
-        
+
         # Record statistics
         episode_stats = {
             'episode': episode,
@@ -257,7 +279,7 @@ def train_neural_combination(init_method: str, episodes: int = 500) -> Dict:
             'train_info': train_info if train_info else {}
         }
         training_stats.append(episode_stats)
-        
+
         if episode % 50 == 0:
             print(f"Episode {episode}/{episodes}, "
                   f"Reward: {episode_stats['total_reward']:.2f}, "
@@ -270,6 +292,7 @@ def train_neural_combination(init_method: str, episodes: int = 500) -> Dict:
         'init_method': init_method,
         'episodes': episodes,
         'training_stats': training_stats,
+        'final_rir': final_rir,  # Save the final RIR
         'final_metrics': {
             'avg_reward': np.mean([s['total_reward'] for s in training_stats[-50:]]),
             'avg_correlation': np.mean([s['final_metrics'].get('correlation', 0.0) 
@@ -277,6 +300,11 @@ def train_neural_combination(init_method: str, episodes: int = 500) -> Dict:
             'avg_steps': np.mean([s['steps'] for s in training_stats[-50:]])
         }
     }
+    # Add structural DRR for final RIR
+    try:
+        results['final_metrics']['structural_drr'] = compute_rir_drr_metric(final_rir, sample_rate=sample_rate)
+    except Exception:
+        results['final_metrics']['structural_drr'] = None
     
     return results
 
@@ -484,6 +512,14 @@ def main():
     
     results_dir = create_results_dir()
     all_results = []
+
+    # RT60 sweep (ms): from 100ms to 1000ms with 200ms steps; include 1000ms as last point
+    rt60_values = [100, 300, 500, 700, 900, 1000]
+    sample_rate = 16000
+    # Fixed RIR length = 400ms as requested
+    rir_length_samples = int(0.4 * sample_rate)
+
+    overall_summary = {}
     
     # Number of episodes for each agent type
     qn_episodes = 300
@@ -500,15 +536,40 @@ def main():
         ('neural', 'exponential_decay', neural_episodes)
     ]
     
-    for agent_type, init_method, episodes in combinations:
-        if agent_type == 'qn':
-            result = train_qn_combination(init_method, episodes)
-        elif agent_type == 'dqn':
-            result = train_dqn_combination(init_method, episodes)
-        else:  # neural
-            result = train_neural_combination(init_method, episodes)
-        
-        all_results.append(result)
+    # Sweep over RT60 values
+    for rt60_ms in rt60_values:
+        print(f"\n=== RT60 = {rt60_ms} ms | RIR length = {rir_length_samples} samples ===")
+        per_rt60_results = []
+        rt_dir = results_dir / f"rt60_{int(rt60_ms)}ms"
+        rt_dir.mkdir(parents=True, exist_ok=True)
+
+        for agent_type, init_method, episodes in combinations:
+            if agent_type == 'qn':
+                result = train_qn_combination(init_method, episodes, rir_length=rir_length_samples, rt60_ms=rt60_ms)
+            elif agent_type == 'dqn':
+                result = train_dqn_combination(init_method, episodes, rir_length=rir_length_samples, rt60_ms=rt60_ms)
+            else:  # neural
+                result = train_neural_combination(init_method, episodes, rir_length=rir_length_samples, rt60_ms=rt60_ms)
+
+            # Tag with RT60 and save per-run
+            result['rt60_ms'] = rt60_ms
+            per_rt60_results.append(result)
+            all_results.append(result)
+
+        # Save per-RT60 results
+        save_results(per_rt60_results, rt_dir)
+
+        # Build a compact summary for this RT60
+        summary = [{
+            'agent_type': r['agent_type'],
+            'init_method': r['init_method'],
+            'final_metrics': r['final_metrics']
+        } for r in per_rt60_results]
+        overall_summary[int(rt60_ms)] = summary
+
+    # Save overall summary JSON mapping RT60 -> per-agent metrics
+    with open(results_dir / 'summary_by_rt60.json', 'w') as f:
+        json.dump(overall_summary, f, indent=2)
     
     # Save results
     save_results(all_results, results_dir)

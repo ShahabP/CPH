@@ -190,11 +190,11 @@ class RIRPolicyNetwork(nn.Module):
         late_update = self.late_reverb_head(features)  # [batch, 192]
         tail_update = self.tail_head(features)  # [batch, rir_length-256]
         
-        # Apply realistic acoustic scaling - encourage more reverberation
-        direct_scale = 0.3   # Moderate direct sound
-        early_scale = 0.4    # Significant early reflections 
-        late_scale = 0.3     # Substantial late reverberation
-        tail_scale = 0.2     # Noticeable tail
+        # Apply DRY acoustic scaling - favor strong direct, suppress reverb
+        direct_scale = 0.8   # Strong direct sound (increased from 0.3)
+        early_scale = 0.15   # Minimal early reflections (reduced from 0.4)
+        late_scale = 0.08    # Very weak late reverberation (reduced from 0.3)
+        tail_scale = 0.03    # Nearly no tail (reduced from 0.2)
         
         # Combine into structured RIR update
         rir_update = torch.cat([
@@ -287,11 +287,8 @@ class NeuralRIRAgent:
         momentum = 0.2
         new_rir = current_rir * (1 - momentum) + (current_rir + rir_update) * momentum
         
-        # Actively encourage reverberation structure during updates
-        new_rir = self._encourage_reverberation(new_rir)
-        
-        # Ensure realistic RIR structure
-        new_rir = self._enforce_acoustic_structure(new_rir)
+        # Enforce dry RIR structure (strong direct, minimal reverb)
+        new_rir = self._enforce_dry_acoustic_structure(new_rir)
         
         # Normalize while preserving structure
         max_amp = np.max(np.abs(new_rir))
@@ -300,50 +297,52 @@ class NeuralRIRAgent:
             
         return new_rir
     
-    def _enforce_acoustic_structure(self, rir: np.ndarray) -> np.ndarray:
-        """Enforce realistic acoustic structure on RIR."""
-        # Ensure direct sound is present but allow substantial reverberation
+    def _enforce_dry_acoustic_structure(self, rir: np.ndarray) -> np.ndarray:
+        """Enforce DRY acoustic structure on RIR - strong direct sound, minimal reverb."""
+        # Ensure strong direct sound
         if len(rir) > 0:
-            # Direct sound should be significant but not overwhelming
+            # Direct sound should be dominant
             peak_idx = np.argmax(np.abs(rir))
-            if peak_idx > 10:  # If peak is too late, boost early tap
-                early_boost = np.abs(rir[peak_idx]) * 0.6
-                rir[0] = max(rir[0], early_boost)
+            if peak_idx > 10:  # If peak is too late, move energy to start
+                rir[0] = max(rir[0], np.abs(rir[peak_idx]) * 0.9)
+            
+            # Ensure direct sound is normalized to 1.0
+            if abs(rir[0]) < 0.8:
+                rir[0] = 1.0 if rir[0] >= 0 else -1.0
         
-        # Apply realistic but generous decay envelope to allow reverberation
+        # Apply TIGHT decay envelope to suppress reverberation
         sample_rate = 16000  # Assuming 16kHz
         
-        # Early reflections (0-50ms): allow substantial reflections
-        early_end = int(0.05 * sample_rate)  # 50ms
+        # Early reflections (0-20ms): allow minimal early reflections
+        early_end = int(0.02 * sample_rate)  # 20ms
         if len(rir) > early_end and len(rir) > 0:
             max_direct = abs(rir[0])
             for i in range(1, min(early_end, len(rir))):
-                # Allow early reflections up to 60% of direct sound
-                max_early = max_direct * 0.6 * np.exp(-i / 200)  # Gradual decay
-                # Don't limit if already smaller
+                # Allow early reflections up to only 20% of direct sound
+                max_early = max_direct * 0.2 * np.exp(-i / 100)  # Fast decay
                 if abs(rir[i]) > max_early:
                     rir[i] = np.sign(rir[i]) * max_early
         
-        # Late reverberation (50-200ms): allow substantial reverb
+        # Late reverberation (20-100ms): heavily suppress
         late_start = early_end
-        late_end = int(0.2 * sample_rate)  # 200ms
+        late_end = int(0.1 * sample_rate)  # 100ms
         if len(rir) > late_start and len(rir) > 0:
             max_direct = abs(rir[0])
             for i in range(late_start, min(late_end, len(rir))):
-                # Allow late reverb up to 40% of direct with slower decay
+                # Allow late reverb up to only 10% of direct with fast decay
                 t = (i - late_start) / (late_end - late_start)
-                decay_factor = np.exp(-2 * t)  # Gentler decay
-                max_late = max_direct * 0.4 * decay_factor
+                decay_factor = np.exp(-5 * t)  # Fast decay
+                max_late = max_direct * 0.1 * decay_factor
                 if abs(rir[i]) > max_late:
                     rir[i] = np.sign(rir[i]) * max_late
         
-        # Tail (200ms+): allow moderate tail
+        # Tail (100ms+): aggressively suppress to near-zero
         if len(rir) > late_end and len(rir) > 0:
             max_direct = abs(rir[0])
             for i in range(late_end, len(rir)):
                 t = (i - late_end) / (len(rir) - late_end)
-                decay_factor = np.exp(-4 * t)  # Moderate decay
-                max_tail = max_direct * 0.2 * decay_factor
+                decay_factor = np.exp(-8 * t)  # Very fast decay
+                max_tail = max_direct * 0.05 * decay_factor
                 if abs(rir[i]) > max_tail:
                     rir[i] = np.sign(rir[i]) * max_tail
         
@@ -477,6 +476,7 @@ class NeuralRIRAgent:
                       sample_rate: int = 16000) -> float:
         """
         Compute DRR-based reward for RIR estimate by dereverbarating the speech.
+        STRONGLY incentivize POSITIVE DRR values.
         
         Args:
             rir: Current RIR estimate
@@ -493,58 +493,61 @@ class NeuralRIRAgent:
             from scipy import signal
             
             # Perform Wiener deconvolution to get dereverberated signal
-            # This is the key: use the RIR to actually dereverb the speech
             dereverberated_audio = self._dereverberate_with_rir(reverb_audio, rir)
             
-            # Compute DRR on the dereverberated audio (not on RIR itself!)
+            # Compute DRR on the dereverberated audio
             drr = self._compute_speech_drr(dereverberated_audio, sample_rate)
             
         except Exception as e:
             # Fallback: heavily penalize if dereverberation fails
             drr = -20.0
         
-        # Normalize DRR to realistic room range (0-15 dB for typical rooms)
+        # HEAVILY reward POSITIVE DRR (dry speech)
         if drr > 0:
-            drr_reward = min(1.0, drr / 15.0)  # Linear up to 15dB
+            # Exponential reward for positive DRR
+            drr_reward = 2.0 * np.tanh(drr / 5.0) + 1.0  # Range [1, 3] for positive DRR
         else:
-            drr_reward = np.tanh(drr / 5.0)  # Gentle penalty for negative DRR
+            # Strong penalty for negative DRR
+            drr_reward = -2.0 * np.abs(drr) / 10.0  # Penalty proportional to negative DRR
         
-        # Secondary rewards for acoustic realism
-        rewards = {'drr': 2.0 * drr_reward}  # Moderate DRR weighting
+        # Primary reward is DRR-based
+        rewards = {'drr': 5.0 * drr_reward}  # STRONG DRR weighting
         
-        # Direct sound strength (should be clear but not dominating)
+        # Direct sound strength (should be very strong for dry RIR)
         direct_strength = np.abs(rir[0]) if len(rir) > 0 else 0
-        # Penalize too strong direct sound to encourage reverberation
-        direct_reward = min(1.0, direct_strength * 2.0) * (1 - max(0, direct_strength - 0.6))
-        rewards['direct'] = 0.8 * direct_reward
+        # Reward very strong direct sound
+        direct_reward = min(2.0, direct_strength * 3.0)
+        rewards['direct'] = 2.0 * direct_reward
         
-        # Early reflection structure (should be substantial)
+        # Penalize early reflections (we want minimal early reflections)
         if len(rir) > 64:
             early_energy = np.sum(rir[1:64] ** 2)
             early_ratio = early_energy / max(rir[0] ** 2, 1e-8)
-            early_reward = 1.0 - abs(early_ratio - 0.4)  # Target 40% early energy
-            rewards['early_struct'] = 1.2 * max(0, early_reward)
+            # Penalty for too much early energy (want < 10%)
+            early_penalty = -max(0, early_ratio - 0.1) * 2.0
+            rewards['early_suppress'] = early_penalty
         
-        # Realistic decay structure - encourage more late reverb
+        # Heavily penalize late reverberation
         if len(rir) > 128:
             late_start = 64
             late_energy = np.sum(rir[late_start:late_start+128] ** 2)
-            total_non_direct = np.sum(rir[1:] ** 2)
-            if total_non_direct > 0:
-                late_ratio = late_energy / total_non_direct
-                late_reward = 1.0 - abs(late_ratio - 0.4)  # Late reverb should be 40% of non-direct
-                rewards['late_struct'] = 1.0 * max(0, late_reward)
+            total_energy = np.sum(rir ** 2)
+            if total_energy > 0:
+                late_ratio = late_energy / total_energy
+                # Strong penalty for late reverb (want < 5% of total)
+                late_penalty = -max(0, late_ratio - 0.05) * 5.0
+                rewards['late_suppress'] = late_penalty
         
-        # Encourage realistic tail presence
+        # Penalize tail presence (want minimal tail)
         if len(rir) > 256:
             tail_energy = np.sum(rir[256:] ** 2)
             total_energy = np.sum(rir ** 2)
             tail_ratio = tail_energy / max(total_energy, 1e-8)
-            # Target 5-15% tail energy for realistic rooms
-            tail_reward = 1.0 - abs(tail_ratio - 0.1)  
-            rewards['tail_presence'] = 0.8 * max(0, tail_reward)
+            # Penalty for tail (want < 2%)
+            tail_penalty = -max(0, tail_ratio - 0.02) * 3.0
+            rewards['tail_suppress'] = tail_penalty
         
-        # Energy decay reward (encourage exponential decay shape)
+        # Reward fast decay (dry rooms have fast decay)
         try:
             peak_idx = np.argmax(np.abs(rir))
             tail = rir[peak_idx + 50:]  # Skip initial reflections
@@ -554,12 +557,13 @@ class NeuralRIRAgent:
                 log_env = np.log(np.abs(tail) + 1e-12)
                 # Simple linear fit to log envelope
                 decay_slope = np.polyfit(t, log_env, 1)[0]
-                decay_reward = max(0, -decay_slope)  # Reward negative slopes
-                rewards['decay'] = 0.1 * min(decay_reward, 1.0)
+                # Reward FAST decay (very negative slope)
+                decay_reward = min(2.0, -decay_slope * 0.5)
+                rewards['fast_decay'] = decay_reward
             else:
-                rewards['decay'] = 0.0
+                rewards['fast_decay'] = 0.0
         except Exception:
-            rewards['decay'] = 0.0
+            rewards['fast_decay'] = 0.0
         
         # Optional: Oracle reward if clean audio available
         if clean_audio is not None:
@@ -586,34 +590,42 @@ class NeuralRIRAgent:
         """Store reward for current step."""
         self.episode_rewards.append(reward)
     
-    def _get_exponential_decay_rir(self, rir_length: int) -> np.ndarray:
+    def _get_exponential_decay_rir(self, rir_length: int, rt60_ms: float = 400.0) -> np.ndarray:
         """
-        Generate exponential decay RIR initialization.
+        Generate exponential decay RIR initialization optimized for DRY conditions.
         
         Creates a physically plausible RIR with:
-        - Strong direct sound at t=0
-        - Exponential decay following typical room acoustics
-        - Realistic decay constants for early and late reflections
+        - Very strong direct sound at t=0
+        - Minimal early reflections
+        - Fast exponential decay for dry room characteristics
         """
         rir = np.zeros(rir_length)
         
-        # Direct sound (strong impulse at t=0)
+        # Very strong direct sound (normalized to 1.0)
         rir[0] = 1.0
         
-        # Early reflections (first 200 samples ~12.5ms at 16kHz)
-        early_decay = 200
-        for i in range(1, min(early_decay, rir_length)):
-            # Add some early reflections with decreasing amplitude
-            reflection_strength = 0.3 * np.exp(-i / 100)
-            if np.random.random() < 0.1:  # Sparse early reflections
-                rir[i] += reflection_strength * (0.5 + np.random.random())
-        
-        # Late reverberation (exponential tail)
-        for i in range(early_decay, rir_length):
-            # Exponential decay with realistic RT60 characteristics
-            decay_rate = 50  # samples (faster decay = shorter RT60)
-            amplitude = 0.1 * np.exp(-i / decay_rate)
-            rir[i] = amplitude * (0.8 + 0.4 * np.random.random())
+        # Use RT60 to shape a FAST exponential decay (dry room)
+        sample_rate = 16000
+        # Use SHORTER effective RT60 for dry room (reduce by factor of 3)
+        rt60_s = max(1e-3, float(rt60_ms) / 1000.0) / 3.0  # Much faster decay
+        const = 6.907755278982137
+
+        # Minimal early reflections: very sparse and weak taps in first 20ms
+        early_limit = int(0.02 * sample_rate)  # Only 20ms
+        for i in range(1, min(early_limit, rir_length)):
+            t_i = i / sample_rate
+            env = np.exp(-const * t_i / rt60_s)
+            reflection_strength = 0.1 * env  # Reduced to 10% from 30%
+            if np.random.random() < 0.03:  # Very sparse (3% vs 8%)
+                rir[i] += reflection_strength * (0.3 + np.random.random() * 0.2)
+
+        # Late reverberation: very weak exponential tail
+        for i in range(early_limit, rir_length):
+            t_i = i / sample_rate
+            env = np.exp(-const * t_i / rt60_s)
+            # Much weaker tail (0.01 vs 0.05)
+            amplitude = 0.01 * env * (0.5 + 0.3 * np.random.random())
+            rir[i] += amplitude
         
         # Normalize to ensure direct sound is prominent
         if np.max(np.abs(rir)) > 0:

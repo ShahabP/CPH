@@ -45,10 +45,11 @@ class RIREstimationEnv(gym.Env):
     
     def __init__(self, 
                  max_iterations: int = 10,
-                 rir_length: int = 1024,
+                 rir_length: int = 6400,
                  feature_dim: int = 513,
                  action_space_type: str = 'continuous',
-                 rir_init_method: str = 'random'):
+                 rir_init_method: str = 'random',
+                 rt60_ms: float = 400.0):
         """
         Initialize RIR estimation environment.
         
@@ -65,6 +66,8 @@ class RIREstimationEnv(gym.Env):
         self.rir_length = rir_length
         self.feature_dim = feature_dim
         self.rir_init_method = rir_init_method
+        # RT60 (ms) used for synthetic RIR generation and decay shaping
+        self.rt60_ms = float(rt60_ms)
         
         # State space: [reverb_features, dereverb_features, current_rir, metrics]
         state_dim = 2 * feature_dim + rir_length + 10  # +10 for metrics
@@ -225,17 +228,24 @@ class RIREstimationEnv(gym.Env):
             for f in [440, 880, 1320]
         ], axis=0) * 0.1
         
-        # Generate synthetic RIR
-        rir_length = 1024
+        # Generate synthetic RIR using configured rir_length and RT60
+        rir_length = int(self.rir_length)
         true_rir = np.zeros(rir_length)
         true_rir[0] = 1.0  # Direct path
-        
-        # Add reflections with exponential decay
-        decay_times = [100, 200, 300, 500]
-        amplitudes = [0.3, 0.2, 0.1, 0.05]
-        for delay, amp in zip(decay_times, amplitudes):
-            if delay < rir_length:
-                true_rir[delay] = amp * np.exp(-delay / 200)
+
+        # RT60 in seconds
+        rt60_s = max(1e-3, float(self.rt60_ms) / 1000.0)
+        # Envelope: amplitude(t) = exp(-6.9078 * t / RT60)
+        const = 6.907755278982137
+        # Add sparse early reflections and an exponential tail
+        for i in range(1, rir_length):
+            t_i = i / sample_rate
+            env = np.exp(-const * t_i / rt60_s)
+            # Early reflections: sparse stronger taps within first 50ms
+            if i < int(0.05 * sample_rate) and (np.random.random() < 0.06):
+                true_rir[i] += 0.25 * env * (0.5 + np.random.random())
+            # Late tail contribution
+            true_rir[i] += 0.05 * env * (0.8 + 0.4 * np.random.random())
         
         # Convolve to create reverberant audio
         reverb_audio = np.convolve(clean_audio, true_rir, mode='same')
