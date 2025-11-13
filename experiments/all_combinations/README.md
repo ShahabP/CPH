@@ -20,17 +20,13 @@ Purpose: explain the approaches and initialization choices so experiments can be
 
 ## RIR length (note)
 
-There are two RIR-length defaults in the codebase and they are intentionally or historically different:
+The codebase uses a unified RIR length of **4096 samples (256 ms at 16 kHz)** across all components:
 
-- Environment default: `RIREstimationEnv` uses `rir_length=6400` (≈400 ms at 16 kHz). This value is used by the main RL environment and many training scripts.
-- Neural policy default: `NeuralRIRAgent` / `RIRPolicyNetwork` are implemented for `rir_length=1024` by default (smaller model size / faster prototyping).
+- Environment: `RIREstimationEnv` default is `rir_length=4096`
+- Neural policy: `NeuralRIRAgent` / `RIRPolicyNetwork` default is `rir_length=4096`
+- Training orchestrator: uses `rir_length=4096` for all experiments
 
-Recommendation: prefer a single canonical RIR length for your experiments (e.g., 6400 samples for realistic room tails). To unify:
-
-- Option A (use 6400 everywhere): update `NeuralRIRAgent(rir_length=6400)` and any network input shapes; increase model capacity or adjust batch sizes as needed.
-- Option B (use 1024 everywhere): set `RIREstimationEnv(rir_length=1024)` and adapt synthetic-data generation accordingly (shorter tails).
-
-Both options are supported by the code with small edits; pick the one that balances realism and runtime for your tests.
+This length balances realism (captures typical room tail characteristics) with computational efficiency (manageable network sizes and training times). If you need longer or shorter RIRs for specific acoustic scenarios, update the defaults in `src/rl_framework/__init__.py`, `src/neural_rir_agent.py`, and `scripts/train_all_combinations.py` consistently.
 
 ## Reproducing experiments
 

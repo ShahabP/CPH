@@ -45,7 +45,7 @@ class RIREstimationEnv(gym.Env):
     
     def __init__(self, 
                  max_iterations: int = 10,
-                 rir_length: int = 6400,
+                 rir_length: int = 4096,
                  feature_dim: int = 513,
                  action_space_type: str = 'continuous',
                  rir_init_method: str = 'random',

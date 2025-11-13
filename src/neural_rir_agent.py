@@ -90,7 +90,7 @@ class RIRPolicyNetwork(nn.Module):
     4. Batch normalization for stable gradients
     """
     
-    def __init__(self, rir_length: int = 6400, hidden_dim: int = 768):
+    def __init__(self, rir_length: int = 4096, hidden_dim: int = 768):
         super().__init__()
         self.rir_length = rir_length
         
@@ -213,7 +213,7 @@ class RIRPolicyNetwork(nn.Module):
 class NeuralRIRAgent:
     """Agent that directly updates RIR using neural policy with DRR rewards."""
     
-    def __init__(self, rir_length: int = 6400, learning_rate: float = 3e-4,
+    def __init__(self, rir_length: int = 4096, learning_rate: float = 3e-4,
                  gamma: float = 0.95, update_scale: float = 0.05):
         self.rir_length = rir_length
         self.gamma = gamma
@@ -694,7 +694,7 @@ class NeuralRIRAgent:
 class NeuralRIREnvironment:
     """Environment for neural RIR policy training."""
     
-    def __init__(self, max_iterations: int = 20, rir_length: int = 6400,
+    def __init__(self, max_iterations: int = 20, rir_length: int = 4096,
                  sample_rate: int = 16000):
         self.max_iterations = max_iterations
         self.rir_length = rir_length

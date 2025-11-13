@@ -454,6 +454,62 @@ def plot_comparison(all_results: List[Dict], results_dir: Path):
     plt.close()
 
 
+def plot_final_rirs(all_results: List[Dict], results_dir: Path):
+    """
+    Plot the final learned RIR for each agent-initialization combination.
+    
+    Args:
+        all_results: List of results dictionaries
+        results_dir: Directory to save plots
+    """
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig.suptitle('Final Learned RIRs for All Methods', fontsize=16, fontweight='bold')
+    
+    axes = axes.flatten()
+    
+    colors = {
+        'QN-random': '#1f77b4',
+        'QN-exponential_decay': '#aec7e8',
+        'DQN-random': '#ff7f0e',
+        'DQN-exponential_decay': '#ffbb78',
+        'Neural-random': '#2ca02c',
+        'Neural-exponential_decay': '#98df8a'
+    }
+    
+    for idx, result in enumerate(all_results):
+        ax = axes[idx]
+        label = f"{result['agent_type']}-{result['init_method']}"
+        
+        # Get final RIR
+        final_rir = result.get('final_rir', None)
+        if final_rir is None:
+            ax.text(0.5, 0.5, 'No RIR data', ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(label, fontweight='bold')
+            continue
+        
+        # Plot time domain
+        time_ms = np.arange(len(final_rir)) / 16.0  # Convert samples to ms (16 kHz)
+        ax.plot(time_ms, final_rir, color=colors.get(label, 'gray'), linewidth=1.5)
+        
+        # Add metrics to title
+        final_metrics = result.get('final_metrics', {})
+        corr = final_metrics.get('avg_correlation', 0.0)
+        reward = final_metrics.get('avg_reward', 0.0)
+        
+        ax.set_title(f"{label}\nCorr: {corr:.3f}, Reward: {reward:.2f}", fontweight='bold', fontsize=10)
+        ax.set_xlabel('Time (ms)', fontweight='bold')
+        ax.set_ylabel('Amplitude', fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        
+        # Mark the decay envelope
+        ax.axhline(y=0, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
+    
+    plt.tight_layout()
+    plt.savefig(results_dir / 'final_rirs_all_methods.png', dpi=300, bbox_inches='tight')
+    print(f"\nSaved final RIRs plot: {results_dir / 'final_rirs_all_methods.png'}")
+    plt.close()
+
+
 def save_results(all_results: List[Dict], results_dir: Path):
     """Save results to files."""
     # Save full results as pickle
@@ -516,8 +572,8 @@ def main():
     # RT60 sweep (ms): from 100ms to 1000ms with 200ms steps; include 1000ms as last point
     rt60_values = [100, 300, 500, 700, 900, 1000]
     sample_rate = 16000
-    # Fixed RIR length = 400ms as requested
-    rir_length_samples = int(0.4 * sample_rate)
+    # Fixed RIR length = 256ms as requested
+    rir_length_samples = int(0.256 * sample_rate)
 
     overall_summary = {}
     
@@ -535,6 +591,9 @@ def main():
         ('neural', 'random', neural_episodes),
         ('neural', 'exponential_decay', neural_episodes)
     ]
+    
+    # Single RT60 test: 400ms only (instead of full sweep)
+    rt60_values = [400]
     
     # Sweep over RT60 values
     for rt60_ms in rt60_values:
@@ -576,6 +635,9 @@ def main():
     
     # Create comparison plots
     plot_comparison(all_results, results_dir)
+    
+    # Plot final RIRs for all methods
+    plot_final_rirs(all_results, results_dir)
     
     # Print summary
     print_summary_table(all_results)
