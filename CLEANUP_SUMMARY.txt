@@ -1,0 +1,58 @@
+================================================================================
+REPOSITORY CLEANUP SUMMARY
+================================================================================
+
+Date: November 18, 2025
+
+FILES REMOVED:
+--------------
+1. scripts/quick_dry_test.py          - Old test script
+2. scripts/test_dry_rir.py            - Old test script  
+3. train_full.py                      - Unused root-level script
+4. DRY_RIR_OPTIMIZATION_SUMMARY.md    - Outdated summary document
+5. data/stream/*.wav                  - Old test audio files (4 files)
+6. .DS_Store files                    - macOS metadata (cleaned recursively)
+7. .cleanup_plan.txt                  - Temporary cleanup plan
+
+TOTAL REMOVED: 11 files
+
+CURRENT STRUCTURE:
+------------------
+✓ 9 Python scripts (all actively used)
+✓ 1 Configuration file (default_config.yaml)
+✓ ~15 Source modules organized by function
+✓ 5 Documentation files (README.md, PROJECT_STRUCTURE.md, etc.)
+✓ 27+ result files (PKL, JSON, PNG) across 3 RIR lengths
+
+DOCUMENTATION ADDED:
+--------------------
+✓ scripts/README.md          - Comprehensive scripts documentation
+✓ PROJECT_STRUCTURE.md       - Visual project structure
+✓ Updated main README.md     - Fixed broken references
+
+BENEFITS:
+---------
+✓ Removed all unused/obsolete files
+✓ Clear separation: scripts/ (executables), src/ (modules), experiments/ (results)
+✓ Comprehensive documentation for every script
+✓ No broken references or dead links
+✓ Clean git status (no untracked junk)
+
+ACTIVE WORKFLOW:
+----------------
+Single RIR Training:
+  1. python scripts/train_all_combinations.py
+  2. python scripts/make_rirs_realistic.py
+  3. python scripts/compute_drr_results.py
+  4. python scripts/plot_rir_comparison_tables.py
+
+Multi-RIR Study:
+  1. python scripts/train_multiple_rir_lengths.py
+  2. python scripts/plot_rir_comparison_tables.py
+
+Testing:
+  - python scripts/smoke_test.py
+
+================================================================================
+Repository is now clean, organized, and production-ready!
+================================================================================

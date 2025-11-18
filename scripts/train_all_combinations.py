@@ -572,8 +572,8 @@ def main():
     # RT60 sweep (ms): from 100ms to 1000ms with 200ms steps; include 1000ms as last point
     rt60_values = [100, 300, 500, 700, 900, 1000]
     sample_rate = 16000
-    # Fixed RIR length = 256ms as requested
-    rir_length_samples = int(0.256 * sample_rate)
+    # Fixed RIR length = 300ms as requested
+    rir_length_samples = int(0.300 * sample_rate)
 
     overall_summary = {}
     
