@@ -187,13 +187,13 @@ def train_dqn_enhanced(init_method: str, episodes: int = 1200,
     return results
 
 
-def train_neural_enhanced(init_method: str, episodes: int = 1000,
+def train_neural_enhanced(init_method: str, episodes: int = 1200,
                           rir_length: int = 4096, rt60_ms: float = 300.0) -> Dict:
     """
     Train Neural RIR agent with ENHANCED parameters.
     
     Improvements:
-    - More episodes (1000 vs 600)
+    - More episodes (1200 vs 600)
     - Better learning rate schedule
     - Larger hidden dimension
     """
@@ -334,8 +334,8 @@ def main():
     print("=" * 80)
     print("\nImprovements:")
     print("  - QN: 8-10 bins (vs 5), 12 actions (vs 8), 1200 episodes (vs 600)")
-    print("  - DQN: Deeper network, 50k buffer (vs 10k), 64 batch (vs 32)")
-    print("  - Neural: 1024 hidden (vs 768), 1000 episodes (vs 600)")
+    print("  - DQN: Deeper network, 50k buffer (vs 10k), 64 batch (vs 32), 1200 episodes (vs 600)")
+    print("  - Neural: 1024 hidden (vs 768), 1200 episodes (vs 600)")
     print()
     
     all_results = {}
@@ -352,7 +352,7 @@ def main():
             # Train all 3 enhanced agents
             results_for_length.append(train_qn_enhanced(init_method, 1200, rir_length, rt60_ms))
             results_for_length.append(train_dqn_enhanced(init_method, 1200, rir_length, rt60_ms))
-            results_for_length.append(train_neural_enhanced(init_method, 1000, rir_length, rt60_ms))
+            results_for_length.append(train_neural_enhanced(init_method, 1200, rir_length, rt60_ms))
         
         all_results[rir_length] = results_for_length
         

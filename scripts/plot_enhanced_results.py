@@ -75,7 +75,8 @@ def main():
     
     # Create comprehensive plot
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-    fig.suptitle('Enhanced Training Results: DRR Performance by RIR Length', 
+    fig.suptitle('Enhanced Training Results: DRR Performance by RIR Length\n' + 
+                 'All Methods: 1200 episodes', 
                  fontsize=16, fontweight='bold')
     
     # Plot 1: QN methods
@@ -86,7 +87,7 @@ def main():
             linewidth=2.5, markersize=10, label='QN Exp Decay')
     ax.set_xlabel('RIR Length (ms)', fontsize=11)
     ax.set_ylabel('Structural DRR (dB)', fontsize=11)
-    ax.set_title('QN Agent Performance', fontsize=12, fontweight='bold')
+    ax.set_title('QN Agent Performance (1200 episodes)', fontsize=12, fontweight='bold')
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=10)
     ax.axhline(y=0, color='k', linestyle=':', linewidth=1, alpha=0.5)
@@ -100,7 +101,7 @@ def main():
             linewidth=2.5, markersize=10, label='DQN Exp Decay')
     ax.set_xlabel('RIR Length (ms)', fontsize=11)
     ax.set_ylabel('Structural DRR (dB)', fontsize=11)
-    ax.set_title('DQN Agent Performance', fontsize=12, fontweight='bold')
+    ax.set_title('DQN Agent Performance (1200 episodes)', fontsize=12, fontweight='bold')
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=10)
     ax.axhline(y=0, color='k', linestyle=':', linewidth=1, alpha=0.5)
@@ -114,7 +115,7 @@ def main():
             linewidth=2.5, markersize=10, label='Neural Exp Decay')
     ax.set_xlabel('RIR Length (ms)', fontsize=11)
     ax.set_ylabel('Structural DRR (dB)', fontsize=11)
-    ax.set_title('Neural Agent Performance', fontsize=12, fontweight='bold')
+    ax.set_title('Neural Agent Performance (1200 episodes)', fontsize=12, fontweight='bold')
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=10)
     ax.axhline(y=0, color='k', linestyle=':', linewidth=1, alpha=0.5)
