@@ -146,6 +146,39 @@
 
 ---
 
+## Table 12: Input Speech Characteristics
+
+| **RT60 (ms)** | **Input Speech DRR (dB)** | **Reverberation Level** | **Neural Agent Output DRR** | **DRR Improvement** |
+|---------------|---------------------------|-------------------------|------------------------------|---------------------|
+| 100 | -15.27 | Very Heavy | ~27-34 dB | +42 to +49 dB |
+| 200 | -15.48 | Very Heavy | ~25-29 dB | +40 to +44 dB |
+| 300 | -13.64 | Very Heavy | ~24-25 dB | +38 to +39 dB |
+| 400 | -13.42 | Very Heavy | ~24-29 dB | +37 to +42 dB |
+| 500 | -13.44 | Very Heavy | ~22-27 dB | +35 to +40 dB |
+| 600 | -13.47 | Very Heavy | ~20-25 dB | +33 to +38 dB |
+| 700 | -13.50 | Very Heavy | ~21-24 dB | +34 to +37 dB |
+| 800 | -13.52 | Very Heavy | ~20-21 dB | +33 to +34 dB |
+
+### DRR Interpretation Scale
+
+| **DRR Range** | **Acoustic Condition** | **Example** |
+|---------------|------------------------|-------------|
+| > 20 dB | Anechoic (no reverberation) | Recording studio, anechoic chamber |
+| 10-15 dB | Light reverberation | Small room, office |
+| 5-10 dB | Moderate reverberation | Living room, classroom |
+| 0-5 dB | Heavy reverberation | Large hall, auditorium |
+| < 0 dB | Very heavy reverberation | Cathedral, large warehouse |
+| **-13 to -15 dB** | **Input condition (this work)** | **Very reverberant speech** |
+
+### Key Insights
+
+1. **Input Challenge**: The input reverberant speech has DRR of approximately **-13 to -15 dB**, representing very heavy reverberation conditions
+2. **Massive Improvement**: The Neural RIR Agent achieves **+33 to +49 dB improvement**, transforming very reverberant speech (< 0 dB) to nearly anechoic conditions (20-34 dB)
+3. **RT60 Dependency**: Performance degrades slightly with longer RT60 (more reverberation), but remains excellent across all conditions
+4. **Success Metric**: Target of ≥7 dB is easily exceeded - the Neural agent achieves 3-5× this threshold
+
+---
+
 ## Summary
 
 ### Q-Learning (QN)
