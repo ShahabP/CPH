@@ -15,10 +15,13 @@ env/
 .vscode/
 
 # Data and experiments
-experiments/
-!experiments/all_combinations/
-!experiments/all_combinations/README.md
-!experiments/all_combinations/summary.json
+experiments/*
+!experiments/*.png
+!experiments/rir_length_enhanced/
+experiments/rir_length_enhanced/*
+!experiments/rir_length_enhanced/*/
+!experiments/rir_length_enhanced/*/summary.json
+experiments/rir_length_enhanced/*/*.pkl
 data/stream/
 data/**/*.wav
 *.npy
