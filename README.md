@@ -55,7 +55,70 @@ python scripts/monitor_training.py
 python scripts/plot_enhanced_results.py
 ```
 
-## 📁 Project Structure
+## � Experimental Setup
+
+### Audio Configuration
+- **Sampling Frequency:** 16,000 Hz
+- **RIR Lengths:** 256, 512, 1024, 2048 samples (16, 32, 64, 128 ms)
+- **Speech Duration:** 2.5 seconds per episode
+- **Clean Speech:** Multi-tone synthetic signal (440, 880, 1320 Hz)
+
+### Acoustic Parameters
+- **RT60 Range:** 100-1200 ms (reverberation time)
+  - Small Office: 200 ms
+  - Medium Room: 350 ms
+  - Large Room: 500 ms
+  - Hall: 700 ms
+  - Cathedral: 1200 ms
+- **Room Dimensions:** 4×3.5×2.8 m to 25×20×10 m
+- **Input Speech DRR:** -13 to -15 dB (very heavy reverberation)
+
+### Training Configuration
+- **Episodes:** 300 (quick tests) to 1200 (full training)
+- **Max Iterations per Episode:** 15 dereverberation steps
+- **Random Seeds:** 3 seeds per configuration (42, 123, 456)
+- **Total Trainings:** 15 (5 rooms × 3 seeds)
+
+### Agent Hyperparameters
+
+#### Neural RIR Agent (Best Performance)
+- **Architecture:** Multi-head policy network
+  - Hidden dimension: 1024
+  - Encoder: 3 layers with LayerNorm + ReLU
+  - Specialized heads: Direct sound, early reflections, late reverb, tail decay
+- **Learning Rate:** 2×10⁻⁴ with ReduceLROnPlateau scheduler
+- **Discount Factor (γ):** 0.99
+- **Optimizer:** Adam with weight decay 1×10⁻⁵
+- **Exploration:** Gaussian noise (σ=0.01)
+
+#### Deep Q-Network (DQN)
+- **Network:** [768, 512, 256, 128] hidden layers
+- **Learning Rate:** 5×10⁻⁴
+- **Replay Buffer:** 50,000 transitions
+- **Batch Size:** 64
+- **ε-greedy:** ε₀=1.0, decay=0.9975, εₘᵢₙ=0.01
+
+#### Q-Learning (QN)
+- **State Space:** 7 features with 5-10 bins each
+- **Action Space:** 12 discrete actions
+- **Learning Rate:** 0.15
+- **ε-greedy:** ε₀=1.0, decay=0.9975, εₘᵢₙ=0.01
+
+### Performance Metrics
+- **Primary:** DRR Gain (dB) - Direct-to-Reverberant Ratio
+- **Secondary:** RIR Correlation with ground truth
+- **Success Criterion:** DRR ≥ 7 dB
+- **Target Achievement:** Neural agent: 20-34 dB (+33 to +49 dB improvement)
+
+### Computational Requirements
+- **Training Time:** ~2 minutes per 300-episode training
+- **GPU:** Recommended but optional (CPU compatible)
+- **Memory:** ~2-4 GB RAM per training
+- **Total Experiment Time:** ~45-60 minutes for full room dimension study
+
+For detailed configuration tables, see [docs/method_configurations.md](docs/method_configurations.md).
+
+## �📁 Project Structure
 
 ```
 Copenhagen/
