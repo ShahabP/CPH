@@ -1,0 +1,584 @@
+\section{Proposed Method: Neural Policy for Blind RIR Estimation}
+\label{sec:method}
+
+This section presents our reinforcement learning framework for blind room impulse response (RIR) estimation through iterative dereverberation. We formulate the RIR estimation problem as a sequential decision-making task and employ an actor-critic neural policy to directly optimize the RIR estimate based on acoustic quality metrics.
+
+\subsection{Problem Formulation}
+\label{subsec:formulation}
+
+Given a reverberant speech signal $y(t)$ recorded in an unknown acoustic environment, our goal is to estimate the room impulse response $h(t)$ that characterizes the reverberation. The reverberant signal can be modeled as:
+
+\begin{equation}
+y(t) = x(t) * h(t) + n(t)
+\label{eq:convolution_model}
+\end{equation}
+
+\noindent where $x(t)$ is the clean (anechoic) speech signal, $*$ denotes convolution, and $n(t)$ represents additive noise. In the blind setting, we only observe $y(t)$ and must estimate $h(t)$ without access to the clean signal $x(t)$.
+
+We discretize the RIR at sampling rate $f_s = 16$ kHz with length $L$ samples, where $L \in \{256, 512, 1024, 2048\}$ corresponding to temporal durations of 16, 32, 64, and 128 ms respectively. The discrete RIR is represented as $\mathbf{h} = [h_0, h_1, \ldots, h_{L-1}]^\top \in \mathbb{R}^L$.
+
+\subsection{Reinforcement Learning Framework}
+\label{subsec:rl_framework}
+
+We formulate RIR estimation as a Markov Decision Process (MDP) defined by the tuple $\langle \mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}, \gamma \rangle$, where:
+
+\begin{itemize}
+    \item \textbf{State space} $\mathcal{S}$: The current RIR estimate $\mathbf{h}^{(k)} \in \mathbb{R}^L$ at iteration $k$
+    \item \textbf{Action space} $\mathcal{A}$: RIR update vector $\boldsymbol{\delta}^{(k)} \in \mathbb{R}^L$
+    \item \textbf{Transition dynamics} $\mathcal{P}$: Deterministic update rule (Equation~\ref{eq:rir_update})
+    \item \textbf{Reward function} $\mathcal{R}$: Acoustic quality metric (Equation~\ref{eq:total_reward})
+    \item \textbf{Discount factor} $\gamma = 0.99$: Balances immediate and future rewards
+\end{itemize}
+
+\subsubsection{Episode Structure and Training Regime}
+
+Training proceeds over $N$ episodes, where each episode represents a complete RIR estimation attempt on a reverberant speech sample. An episode consists of $K = 15$ sequential iterations (time steps) during which the agent progressively refines its RIR estimate. This episodic structure serves two purposes:
+
+First, within each episode, the agent performs iterative refinement: starting from an initial estimate $\mathbf{h}^{(0)}$ (Section~\ref{subsec:initialization}), it applies $K$ sequential updates $\{\boldsymbol{\delta}^{(1)}, \ldots, \boldsymbol{\delta}^{(K)}\}$ to improve the RIR quality. Each iteration $k$ follows the standard RL cycle: observe state $\mathbf{h}^{(k-1)}$, select action $\boldsymbol{\delta}^{(k)}$, update RIR (Equation~\ref{eq:rir_update}), and receive reward $r^{(k)}$ (Equation~\ref{eq:total_reward}). The episodic returns $\{G^{(1)}, \ldots, G^{(K)}\}$ capture the cumulative long-term quality achieved by the sequence of actions.
+
+Second, across episodes, the policy network learns from diverse acoustic conditions: each of the $N$ episodes uses a different reverberant speech signal, potentially with varying RT60 values, room characteristics, and speech content. This episodic sampling ensures the learned policy generalizes across acoustic environments. After each episode, the agent performs a policy gradient update (Section~\ref{subsec:learning}) using the accumulated experience $\{(\mathbf{h}^{(k)}, \boldsymbol{\delta}^{(k)}, r^{(k)})\}_{k=1}^K$ from that episode, gradually improving its estimation strategy.
+
+We train for $N \in [300, 1200]$ episodes depending on the task complexity. For standard configurations (RT60 $\approx$ 400 ms, $L = 2048$), 300 episodes suffice for convergence, requiring approximately 2--3 minutes on a standard GPU. More challenging scenarios (long RT60 or large $L$) benefit from extended training up to 1200 episodes.
+
+\subsection{Neural Policy Network Architecture}
+\label{subsec:network}
+
+We employ a deep neural network policy $\pi_\theta: \mathbb{R}^L \rightarrow \mathbb{R}^L \times \mathbb{R}$ parameterized by $\theta$ that maps the current RIR state to both an update action and a state value estimate. The architecture consists of three main components, detailed in Table~\ref{tab:network_architecture}:
+
+\begin{table}[htbp]
+\centering
+\caption{Neural Policy Network Architecture Details}
+\label{tab:network_architecture}
+\small
+\begin{tabular}{@{}llllp{4cm}@{}}
+\toprule
+\textbf{Component} & \textbf{Layer} & \textbf{Input Dim} & \textbf{Output Dim} & \textbf{Operations} \\
+\midrule
+\multirow{4}{*}{\textbf{Input}} 
+& LayerNorm & $L$ & $L$ & Normalize RIR input \\
+\cmidrule(lr){2-5}
+\multirow{8}{*}{\textbf{Encoder}} 
+& Linear 1 & $L$ & $d$ & $W_1 \in \mathbb{R}^{d \times L}$ \\
+& LayerNorm & $d$ & $d$ & Normalize activations \\
+& ReLU & $d$ & $d$ & Non-linearity \\
+& Dropout (0.1) & $d$ & $d$ & Regularization \\
+\cmidrule(lr){2-5}
+& Linear 2 & $d$ & $d$ & $W_2 \in \mathbb{R}^{d \times d}$ \\
+& LayerNorm & $d$ & $d$ & Normalize activations \\
+& ReLU & $d$ & $d$ & Non-linearity \\
+& Residual & $2d$ & $d$ & Add input from Linear 1 \\
+& Dropout (0.1) & $d$ & $d$ & Regularization \\
+\cmidrule(lr){2-5}
+& Linear 3 & $d$ & $d/2$ & $W_3 \in \mathbb{R}^{(d/2) \times d}$ \\
+& LayerNorm & $d/2$ & $d/2$ & Normalize activations \\
+& ReLU & $d/2$ & $d/2$ & Non-linearity \\
+\midrule
+\multirow{12}{*}{\textbf{Actor Heads}} 
+& \multicolumn{4}{l}{\textit{Direct Sound Head}} \\
+& Linear & $d/2$ & 32 & Hidden layer \\
+& ReLU & 32 & 32 & Non-linearity \\
+& Linear & 32 & 1 & Output layer \\
+& Sigmoid & 1 & 1 & $\delta_{\text{direct}} \in [0, 1]$ \\
+\cmidrule(lr){2-5}
+& \multicolumn{4}{l}{\textit{Early Reflections Head}} \\
+& Linear & $d/2$ & 128 & Hidden layer 1 \\
+& ReLU & 128 & 128 & Non-linearity \\
+& Linear & 128 & 64 & Hidden layer 2 \\
+& Linear & 64 & 63 & Output layer \\
+& Tanh & 63 & 63 & $\delta_{\text{early}} \in [-1, 1]^{63}$ \\
+\cmidrule(lr){2-5}
+& \multicolumn{4}{l}{\textit{Late Reverberation Head}} \\
+& Linear & $d/2$ & 128 & Hidden layer 1 \\
+& ReLU & 128 & 128 & Non-linearity \\
+& Linear & 128 & 64 & Hidden layer 2 \\
+& Linear & 64 & 192 & Output layer \\
+& Tanh & 192 & 192 & $\delta_{\text{late}} \in [-1, 1]^{192}$ \\
+\cmidrule(lr){2-5}
+& \multicolumn{4}{l}{\textit{Tail Decay Head}} \\
+& Linear & $d/2$ & 128 & Hidden layer 1 \\
+& ReLU & 128 & 128 & Non-linearity \\
+& Linear & 128 & 32 & Hidden layer 2 \\
+& Linear & 32 & $L-256$ & Output layer \\
+& Tanh & $L-256$ & $L-256$ & $\delta_{\text{tail}} \in [-1, 1]^{L-256}$ \\
+\midrule
+\multirow{5}{*}{\textbf{Critic Head}} 
+& Linear & $d/2$ & $d/4$ & Hidden layer 1 \\
+& ReLU & $d/4$ & $d/4$ & Non-linearity \\
+& Dropout (0.1) & $d/4$ & $d/4$ & Regularization \\
+& Linear & $d/4$ & $d/8$ & Hidden layer 2 \\
+& ReLU & $d/8$ & $d/8$ & Non-linearity \\
+& Linear & $d/8$ & 1 & Output: $V(\mathbf{h})$ \\
+\midrule
+\multicolumn{5}{l}{\textbf{Total Parameters:} $\approx 3.2$M (for $L=2048$, $d=1024$)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{RIR Encoder}
+
+Table~\ref{tab:hyperparameters} summarizes all hyperparameters and coefficients used throughout the algorithm.
+
+\begin{table}[htbp]
+\centering
+\caption{Hyperparameters and Coefficients}
+\label{tab:hyperparameters}
+\small
+\begin{tabular}{@{}llp{6cm}l@{}}
+\toprule
+\textbf{Category} & \textbf{Parameter} & \textbf{Description} & \textbf{Value} \\
+\midrule
+\multirow{4}{*}{\textbf{RIR Config}} 
+& $L$ & RIR length (samples) & 256, 512, 1024, 2048 \\
+& $f_s$ & Sampling rate (Hz) & 16,000 \\
+& $T_{\text{RIR}}$ & RIR duration (ms) & 16, 32, 64, 128 \\
+& $T_{60}$ & Reverberation time (ms) & 100--1200 \\
+\midrule
+\multirow{5}{*}{\textbf{Network}} 
+& $d$ & Hidden dimension & 1024 \\
+& Dropout rate & Regularization probability & 0.1 \\
+& $d_{\text{latent}}$ & Latent dimension & 512 ($d/2$) \\
+& $d_{\text{value}}$ & Value network hidden dims & 256, 128 ($d/4$, $d/8$) \\
+& Total parameters & Network size & $\approx$3.2M \\
+\midrule
+\multirow{6}{*}{\textbf{Acoustic Scales}} 
+& $\alpha_d$ & Direct sound scale & 0.8 \\
+& $\alpha_e$ & Early reflections scale & 0.15 \\
+& $\alpha_l$ & Late reverberation scale & 0.08 \\
+& $\alpha_t$ & Tail decay scale & 0.03 \\
+& $\beta$ & RIR update momentum & 0.2 \\
+& $\lambda$ & Wiener regularization & 0.01 \\
+\midrule
+\multirow{8}{*}{\textbf{Envelope Constraints}} 
+& Direct threshold & Min direct sound strength & 0.8 \\
+& Early max ratio & Max early/direct ratio & 0.2 \\
+& Early decay const & Early reflection decay & 100 samples \\
+& Late max ratio & Max late/total ratio & 0.1 \\
+& Late decay rate & Late reverb decay & $5t_i$ \\
+& Tail max ratio & Max tail/total ratio & 0.05 \\
+& Tail decay rate & Tail decay & $8t_i$ \\
+& $t_{\text{early}}$ & Early boundary (ms) & 20 \\
+& $t_{\text{late}}$ & Late boundary (ms) & 100 \\
+\midrule
+\multirow{12}{*}{\textbf{Reward Weights}} 
+& $w_{\text{DRR}}$ & DRR reward weight & 5.0 \\
+& $w_{\text{dir}}$ & Direct sound weight & 2.0 \\
+& $w_{\text{early}}$ & Early suppression weight & 1.0 \\
+& $w_{\text{late}}$ & Late suppression weight & 1.0 \\
+& $w_{\text{tail}}$ & Tail suppression weight & 1.0 \\
+& $w_{\text{decay}}$ & Decay reward weight & 1.0 \\
+\cmidrule(lr){2-4}
+& $\rho_{\text{early}}^{\text{target}}$ & Target early/direct ratio & 0.1 (10\%) \\
+& $\rho_{\text{late}}^{\text{target}}$ & Target late/total ratio & 0.05 (5\%) \\
+& $\rho_{\text{tail}}^{\text{target}}$ & Target tail/total ratio & 0.02 (2\%) \\
+& DRR scale & DRR normalization factor & 5.0 \\
+& Direct scale & Direct reward scale & 3.0 \\
+& Decay scale & Decay reward scale & 0.5 \\
+\midrule
+\multirow{4}{*}{\textbf{DRR Computation}} 
+& $F$ & Frame size (samples) & 400 (25 ms) \\
+& $H$ & Hop size (samples) & 160 (10 ms) \\
+& $N_d$ & Direct frames & 20 (first 200 ms) \\
+& $\epsilon$ & Numerical stability & $10^{-12}$ \\
+\midrule
+\multirow{7}{*}{\textbf{Training}} 
+& $K$ & Iterations per episode & 15 \\
+& $N$ & Training episodes & 300--1200 \\
+& $\gamma$ & Discount factor & 0.99 \\
+& $\eta$ & Learning rate & $2 \times 10^{-4}$ \\
+& $\lambda_w$ & Weight decay & $10^{-5}$ \\
+& $\alpha_c$ & Critic loss weight & 0.5 \\
+& Gradient clip norm & Max gradient norm & 0.5 \\
+& LR schedule factor & Learning rate reduction & 0.8 \\
+& LR schedule patience & Episodes before reduction & 10 \\
+\midrule
+\multirow{4}{*}{\textbf{Initialization}} 
+& $h_0^{(0)}$ & Initial direct sound & 1.0 \\
+& Early prob & Bernoulli probability & 0.03 (3\%) \\
+& Early amplitude & Early reflection scale & 0.3 \\
+& RT60 factor & Decay acceleration & 1/3 (faster decay) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The encoder processes the current RIR estimate through multiple residual blocks to extract acoustic features:
+
+\begin{equation}
+\mathbf{z}_1 = \text{ReLU}(\text{LayerNorm}(W_1 \cdot \text{LayerNorm}(\mathbf{h}^{(k)}) + \mathbf{b}_1))
+\label{eq:encoder1}
+\end{equation}
+
+\begin{equation}
+\mathbf{z}_2 = \text{ReLU}(\text{LayerNorm}(W_2 \mathbf{z}_1 + \mathbf{b}_2)) + \mathbf{z}_1
+\label{eq:encoder2}
+\end{equation}
+
+\begin{equation}
+\mathbf{f} = \text{ReLU}(\text{LayerNorm}(W_3 \mathbf{z}_2 + \mathbf{b}_3))
+\label{eq:features}
+\end{equation}
+
+\noindent where $W_1 \in \mathbb{R}^{d \times L}$, $W_2, W_3 \in \mathbb{R}^{d \times d}$ are learnable weight matrices with hidden dimension $d = 1024$. Layer normalization stabilizes training, while the residual connection in Equation~\ref{eq:encoder2} facilitates gradient flow.
+
+\subsubsection{Structured RIR Update Generation}
+
+To enforce physically plausible RIR structure, we employ specialized output heads for different temporal regions of the impulse response:
+
+\begin{equation}
+\boldsymbol{\delta}_\text{direct} = \sigma(W_d \mathbf{f} + \mathbf{b}_d) \in \mathbb{R}^1
+\label{eq:direct_head}
+\end{equation}
+
+\begin{equation}
+\boldsymbol{\delta}_\text{early} = \tanh(W_e \mathbf{f} + \mathbf{b}_e) \in \mathbb{R}^{63}
+\label{eq:early_head}
+\end{equation}
+
+\begin{equation}
+\boldsymbol{\delta}_\text{late} = \tanh(W_l \mathbf{f} + \mathbf{b}_l) \in \mathbb{R}^{192}
+\label{eq:late_head}
+\end{equation}
+
+\begin{equation}
+\boldsymbol{\delta}_\text{tail} = \tanh(W_t \mathbf{f} + \mathbf{b}_t) \in \mathbb{R}^{L-256}
+\label{eq:tail_head}
+\end{equation}
+
+\noindent where $\sigma(\cdot)$ is the sigmoid activation ensuring positive direct sound, and $\tanh(\cdot)$ allows bipolar updates for reflections. The complete update vector is assembled as:
+
+\begin{equation}
+\boldsymbol{\delta}^{(k)} = \begin{bmatrix}
+\alpha_d \boldsymbol{\delta}_\text{direct} \\
+\alpha_e \boldsymbol{\delta}_\text{early} \\
+\alpha_l \boldsymbol{\delta}_\text{late} \\
+\alpha_t \boldsymbol{\delta}_\text{tail}
+\end{bmatrix}
+\label{eq:structured_update}
+\end{equation}
+
+\noindent with acoustic scaling factors $\alpha_d = 0.8$, $\alpha_e = 0.15$, $\alpha_l = 0.08$, $\alpha_t = 0.03$ chosen to favor dry acoustic conditions (strong direct sound, minimal reverberation).
+
+\subsubsection{Value Function}
+
+The critic network estimates the expected return from the current state:
+
+\begin{equation}
+V(\mathbf{h}^{(k)}) = W_v \mathbf{f} + \mathbf{b}_v \in \mathbb{R}
+\label{eq:value_function}
+\end{equation}
+
+\noindent where $W_v \in \mathbb{R}^{1 \times (d/2)}$ projects the feature representation to a scalar value estimate.
+
+\subsection{RIR Update Mechanism}
+\label{subsec:update_mechanism}
+
+The RIR is updated using a momentum-based scheme to ensure stable convergence:
+
+\begin{equation}
+\mathbf{h}^{(k+1)} = (1 - \beta) \mathbf{h}^{(k)} + \beta (\mathbf{h}^{(k)} + \boldsymbol{\delta}^{(k)})
+\label{eq:rir_update}
+\end{equation}
+
+\noindent where $\beta = 0.2$ is the momentum coefficient. This formulation combines the current estimate with the proposed update, preventing abrupt changes that could destabilize training.
+
+To enforce realistic acoustic structure, we apply temporal constraints:
+
+\begin{equation}
+h_0^{(k+1)} \leftarrow \max(h_0^{(k+1)}, 0.8 \cdot \max_i |h_i^{(k+1)}|)
+\label{eq:direct_constraint}
+\end{equation}
+
+\begin{equation}
+h_i^{(k+1)} \leftarrow \text{clip}(h_i^{(k+1)}, -\alpha_{\text{max}}(i) |h_0^{(k+1)}|, \alpha_{\text{max}}(i) |h_0^{(k+1)}|), \quad i > 0
+\label{eq:envelope_constraint}
+\end{equation}
+
+\noindent where the envelope function is defined as:
+
+\begin{equation}
+\alpha_{\text{max}}(i) = \begin{cases}
+0.2 \exp(-i/100), & 0 < i \leq 320 \text{ (early, 0--20 ms)} \\
+0.1 \exp(-5t_i), & 320 < i \leq 1600 \text{ (late, 20--100 ms)} \\
+0.05 \exp(-8t_i), & i > 1600 \text{ (tail, $>$100 ms)}
+\end{cases}
+\label{eq:envelope_function}
+\end{equation}
+
+\noindent where $t_i$ is the normalized time within each region. These constraints ensure a strong direct sound impulse followed by rapidly decaying reflections, consistent with dry acoustic environments.
+
+\subsection{Reward Function Design}
+\label{subsec:reward}
+
+The reward function evaluates the quality of the estimated RIR through multiple acoustic criteria. The total reward at iteration $k$ is:
+
+\begin{equation}
+r^{(k)} = w_\text{DRR} \cdot r_\text{DRR} + w_\text{dir} \cdot r_\text{dir} + w_\text{early} \cdot r_\text{early} + w_\text{late} \cdot r_\text{late} + w_\text{tail} \cdot r_\text{tail} + w_\text{decay} \cdot r_\text{decay}
+\label{eq:total_reward}
+\end{equation}
+
+\noindent where the weights are $w_\text{DRR} = 5.0$, $w_\text{dir} = 2.0$, $w_\text{early} = 1.0$, $w_\text{late} = 1.0$, $w_\text{tail} = 1.0$, $w_\text{decay} = 1.0$, and each component is defined below.
+
+\subsubsection{Direct-to-Reverberant Ratio (DRR) Reward}
+
+The primary reward is based on the DRR of speech dereverberated using the estimated RIR. We first apply Wiener deconvolution:
+
+\begin{equation}
+\hat{X}(f) = \frac{H^*(f)}{|H(f)|^2 + \lambda} Y(f)
+\label{eq:wiener_deconvolution}
+\end{equation}
+
+\noindent where $Y(f)$, $H(f)$, and $\hat{X}(f)$ are the Fourier transforms of the reverberant signal, estimated RIR, and dereverberated speech respectively, $H^*(f)$ denotes complex conjugation, and $\lambda = 0.01$ is a regularization parameter preventing division by zero.
+
+The dereverberated signal $\hat{x}(t) = \mathcal{F}^{-1}\{\hat{X}(f)\}$ is analyzed using frame-based energy to compute DRR:
+
+\begin{equation}
+E_\text{direct} = \max_{i \in [1, N_d]} \sum_{n=iH}^{iH + F} \hat{x}^2(n)
+\label{eq:direct_energy}
+\end{equation}
+
+\begin{equation}
+E_\text{reverb} = \frac{1}{N_r} \sum_{i=N_d+1}^{N} \sum_{n=iH}^{iH + F} \hat{x}^2(n)
+\label{eq:reverb_energy}
+\end{equation}
+
+\begin{equation}
+\text{DRR}_\text{speech} = 10 \log_{10} \left( \frac{E_\text{direct}}{E_\text{reverb} + \epsilon} \right) \text{ dB}
+\label{eq:speech_drr}
+\end{equation}
+
+\noindent where $F = 400$ samples (25 ms frame), $H = 160$ samples (10 ms hop), $N_d = 20$ frames (first 200 ms containing direct sound), $N$ is the total number of frames, and $\epsilon = 10^{-12}$ prevents numerical issues.
+
+The DRR reward encourages positive (dry) speech quality:
+
+\begin{equation}
+r_\text{DRR} = \begin{cases}
+2 \tanh(\text{DRR}_\text{speech}/5) + 1, & \text{DRR}_\text{speech} > 0 \\
+-0.2 |\text{DRR}_\text{speech}|, & \text{DRR}_\text{speech} \leq 0
+\end{cases}
+\label{eq:drr_reward}
+\end{equation}
+
+\subsubsection{Direct Sound Reward}
+
+We reward strong direct sound impulses:
+
+\begin{equation}
+r_\text{dir} = \min(2.0, 3 |h_0^{(k+1)}|)
+\label{eq:direct_reward}
+\end{equation}
+
+\subsubsection{Early Reflection Suppression}
+
+We penalize excessive early reflection energy relative to direct sound:
+
+\begin{equation}
+E_\text{early} = \sum_{i=1}^{63} (h_i^{(k+1)})^2, \quad \rho_\text{early} = \frac{E_\text{early}}{(h_0^{(k+1)})^2 + \epsilon}
+\label{eq:early_energy}
+\end{equation}
+
+\begin{equation}
+r_\text{early} = -2 \max(0, \rho_\text{early} - 0.1)
+\label{eq:early_reward}
+\end{equation}
+
+\subsubsection{Late Reverberation Suppression}
+
+We heavily penalize late reverberation:
+
+\begin{equation}
+E_\text{late} = \sum_{i=64}^{191} (h_i^{(k+1)})^2, \quad \rho_\text{late} = \frac{E_\text{late}}{E_\text{total} + \epsilon}
+\label{eq:late_energy}
+\end{equation}
+
+\begin{equation}
+r_\text{late} = -5 \max(0, \rho_\text{late} - 0.05)
+\label{eq:late_reward}
+\end{equation}
+
+\noindent where $E_\text{total} = \sum_{i=0}^{L-1} (h_i^{(k+1)})^2$.
+
+\subsubsection{Tail Suppression}
+
+We penalize energy in the reverberant tail:
+
+\begin{equation}
+E_\text{tail} = \sum_{i=256}^{L-1} (h_i^{(k+1)})^2, \quad \rho_\text{tail} = \frac{E_\text{tail}}{E_\text{total} + \epsilon}
+\label{eq:tail_energy}
+\end{equation}
+
+\begin{equation}
+r_\text{tail} = -3 \max(0, \rho_\text{tail} - 0.02)
+\label{eq:tail_reward}
+\end{equation}
+
+\subsubsection{Exponential Decay Reward}
+
+We reward fast exponential decay by fitting a linear model to the log-envelope:
+
+\begin{equation}
+\log |\mathbf{h}_\text{tail}^{(k+1)}| \approx m \mathbf{t} + c
+\label{eq:decay_fit}
+\end{equation}
+
+\noindent where $\mathbf{h}_\text{tail}^{(k+1)} = [h_{p+50}^{(k+1)}, \ldots, h_{L-1}^{(k+1)}]$ excludes initial reflections, $p = \arg\max_i |h_i^{(k+1)}|$ is the peak index, and $\mathbf{t}$ is the corresponding time vector. The decay reward is:
+
+\begin{equation}
+r_\text{decay} = \min(2.0, -0.5m)
+\label{eq:decay_reward}
+\end{equation}
+
+\noindent favoring fast (negative) decay slopes.
+
+\subsection{Actor-Critic Learning Algorithm}
+\label{subsec:learning}
+
+We employ an actor-critic policy gradient method to train the neural policy. After each episode of $K$ iterations, we compute discounted returns:
+
+\begin{equation}
+G^{(k)} = \sum_{j=k}^{K} \gamma^{j-k} r^{(j)}
+\label{eq:discounted_return}
+\end{equation}
+
+The returns are normalized for stable learning:
+
+\begin{equation}
+\tilde{G}^{(k)} = \frac{G^{(k)} - \mu_G}{\sigma_G + \epsilon}
+\label{eq:normalized_returns}
+\end{equation}
+
+\noindent where $\mu_G$ and $\sigma_G$ are the mean and standard deviation of returns in the episode.
+
+The advantage function measures how much better an action is compared to the average:
+
+\begin{equation}
+A^{(k)} = \tilde{G}^{(k)} - V(\mathbf{h}^{(k)})
+\label{eq:advantage}
+\end{equation}
+
+The policy is updated using two loss components. The actor loss encourages actions with positive advantages:
+
+\begin{equation}
+\mathcal{L}_\text{actor} = -\frac{1}{K} \sum_{k=1}^{K} \log \pi_\theta(\boldsymbol{\delta}^{(k)} | \mathbf{h}^{(k)}) \cdot A^{(k)}
+\label{eq:actor_loss}
+\end{equation}
+
+\noindent where the log-probability under a Gaussian policy is:
+
+\begin{equation}
+\log \pi_\theta(\boldsymbol{\delta}^{(k)} | \mathbf{h}^{(k)}) = -\frac{1}{2} \|\boldsymbol{\delta}^{(k)} - \boldsymbol{\mu}_\theta(\mathbf{h}^{(k)})\|^2
+\label{eq:log_prob}
+\end{equation}
+
+\noindent with $\boldsymbol{\mu}_\theta(\mathbf{h}^{(k)})$ being the mean action from the policy network (Equation~\ref{eq:structured_update}).
+
+The critic loss trains the value function to predict returns:
+
+\begin{equation}
+\mathcal{L}_\text{critic} = \frac{1}{K} \sum_{k=1}^{K} (V(\mathbf{h}^{(k)}) - \tilde{G}^{(k)})^2
+\label{eq:critic_loss}
+\end{equation}
+
+The combined loss with critic weight $\alpha_c = 0.5$ is:
+
+\begin{equation}
+\mathcal{L}_\text{total} = \mathcal{L}_\text{actor} + \alpha_c \mathcal{L}_\text{critic}
+\label{eq:total_loss}
+\end{equation}
+
+Parameters are updated using Adam optimizer with learning rate $\eta = 2 \times 10^{-4}$, weight decay $\lambda_w = 10^{-5}$, and gradient clipping at norm 0.5 for stability:
+
+\begin{equation}
+\theta \leftarrow \theta - \eta \nabla_\theta \mathcal{L}_\text{total}, \quad \|\nabla_\theta \mathcal{L}_\text{total}\| \leq 0.5
+\label{eq:parameter_update}
+\end{equation}
+
+The learning rate is adapted using ReduceLROnPlateau scheduling with factor 0.8 and patience 10 episodes based on mean episode return.
+
+\subsection{Exponential Decay Initialization}
+\label{subsec:initialization}
+
+The initial RIR estimate $\mathbf{h}^{(0)}$ critically impacts convergence. We employ an exponential decay initialization that provides a physically plausible starting point:
+
+\begin{equation}
+h_0^{(0)} = 1.0
+\label{eq:init_direct}
+\end{equation}
+
+\begin{equation}
+h_i^{(0)} = \begin{cases}
+\xi_i \cdot 0.3 \exp(-i/100), & i \in [1, 320], \xi_i \sim \text{Bernoulli}(0.03) \\
+\xi_i \cdot 0.01 \exp\left(-\frac{6.907 \cdot i}{f_s \cdot T_{60}/3}\right), & i > 320
+\end{cases}
+\label{eq:init_reflections}
+\end{equation}
+
+\noindent where $T_{60}$ is the target RT60 in seconds, the constant 6.907 corresponds to 60 dB decay ($\ln(10^6) \approx 6.907$), and $\xi_i$ are Bernoulli random variables creating sparse reflections with 3\% probability. The division by 3 in the decay constant creates a faster-than-natural decay favoring dry initialization. The RIR is then normalized:
+
+\begin{equation}
+\mathbf{h}^{(0)} \leftarrow \frac{\mathbf{h}^{(0)}}{\max_i |h_i^{(0)}|}
+\label{eq:init_normalize}
+\end{equation}
+
+This initialization places the agent near a good solution, significantly accelerating convergence compared to random initialization.
+
+\subsection{Training Algorithm}
+\label{subsec:training_algorithm}
+
+Algorithm~\ref{alg:neural_rir} summarizes the complete training procedure. Each training episode processes a new reverberant speech sample, iteratively refines the RIR estimate over $K$ steps, and performs a policy gradient update based on the accumulated rewards.
+
+\begin{algorithm}[htbp]
+\caption{Neural Policy for Blind RIR Estimation}
+\label{alg:neural_rir}
+\begin{algorithmic}[1]
+\REQUIRE Reverberant speech signal $y(t)$, RIR length $L$, iterations per episode $K$, total episodes $N$
+\ENSURE Trained policy network $\pi_\theta$
+\STATE Initialize policy network $\pi_\theta$ with random weights
+\STATE Initialize Adam optimizer with $\eta = 2 \times 10^{-4}$, $\lambda_w = 10^{-5}$
+\FOR{episode $= 1$ to $N$}
+    \STATE Generate/load reverberant speech $y(t)$
+    \STATE Initialize RIR estimate $\mathbf{h}^{(0)}$ using Equations~\ref{eq:init_direct}--\ref{eq:init_normalize}
+    \STATE Initialize episode buffers: $\mathcal{B}_s, \mathcal{B}_a, \mathcal{B}_r, \mathcal{B}_v \leftarrow \emptyset$
+    \FOR{iteration $k = 1$ to $K$}
+        \STATE Compute update and value: $(\boldsymbol{\delta}^{(k)}, V^{(k)}) \leftarrow \pi_\theta(\mathbf{h}^{(k-1)})$ \hfill {\scriptsize // Forward pass}
+        \STATE Update RIR: $\mathbf{h}^{(k)} \leftarrow (1-\beta)\mathbf{h}^{(k-1)} + \beta(\mathbf{h}^{(k-1)} + \boldsymbol{\delta}^{(k)})$ \hfill {\scriptsize // Eq.~\ref{eq:rir_update}}
+        \STATE Apply constraints: $\mathbf{h}^{(k)} \leftarrow \text{Constrain}(\mathbf{h}^{(k)})$ \hfill {\scriptsize // Eqs.~\ref{eq:direct_constraint}--\ref{eq:envelope_constraint}}
+        \STATE Dereverberate: $\hat{x}^{(k)}(t) \leftarrow \text{WienerDeconv}(y(t), \mathbf{h}^{(k)})$ \hfill {\scriptsize // Eq.~\ref{eq:wiener_deconvolution}}
+        \STATE Compute reward: $r^{(k)} \leftarrow \text{Reward}(\mathbf{h}^{(k)}, \hat{x}^{(k)}(t))$ \hfill {\scriptsize // Eq.~\ref{eq:total_reward}}
+        \STATE Store transition: $\mathcal{B}_s \leftarrow \mathbf{h}^{(k-1)}$, $\mathcal{B}_a \leftarrow \boldsymbol{\delta}^{(k)}$, $\mathcal{B}_r \leftarrow r^{(k)}$, $\mathcal{B}_v \leftarrow V^{(k)}$
+    \ENDFOR
+    \STATE Compute discounted returns: $\{G^{(k)}\}_{k=1}^K$ using Equation~\ref{eq:discounted_return}
+    \STATE Normalize returns: $\{\tilde{G}^{(k)}\}_{k=1}^K$ using Equation~\ref{eq:normalized_returns}
+    \STATE Compute advantages: $A^{(k)} \leftarrow \tilde{G}^{(k)} - \mathcal{B}_v^{(k)}$ for $k = 1, \ldots, K$ \hfill {\scriptsize // Eq.~\ref{eq:advantage}}
+    \STATE Compute actor loss: $\mathcal{L}_\text{actor}$ using Equation~\ref{eq:actor_loss}
+    \STATE Compute critic loss: $\mathcal{L}_\text{critic}$ using Equation~\ref{eq:critic_loss}
+    \STATE Total loss: $\mathcal{L}_\text{total} \leftarrow \mathcal{L}_\text{actor} + 0.5 \mathcal{L}_\text{critic}$ \hfill {\scriptsize // Eq.~\ref{eq:total_loss}}
+    \STATE Compute gradients: $\mathbf{g} \leftarrow \nabla_\theta \mathcal{L}_\text{total}$
+    \STATE Clip gradients: $\mathbf{g} \leftarrow \mathbf{g} / \max(1, \|\mathbf{g}\|/0.5)$
+    \STATE Update parameters: $\theta \leftarrow \text{Adam}(\theta, \mathbf{g})$ \hfill {\scriptsize // Eq.~\ref{eq:parameter_update}}
+    \STATE Update learning rate schedule based on episode return
+\ENDFOR
+\STATE \textbf{return} Trained policy $\pi_\theta$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Inference}
+\label{subsec:inference}
+
+At test time, given a new reverberant speech signal $y_\text{test}(t)$, we apply the trained policy to estimate the RIR:
+
+\begin{enumerate}
+    \item Initialize $\mathbf{h}^{(0)}$ using exponential decay (Equations~\ref{eq:init_direct}--\ref{eq:init_normalize})
+    \item For $k = 1, \ldots, K$:
+    \begin{enumerate}
+        \item Compute update: $\boldsymbol{\delta}^{(k)} \leftarrow \pi_\theta(\mathbf{h}^{(k-1)})$ (inference mode, no exploration noise)
+        \item Update RIR: $\mathbf{h}^{(k)} \leftarrow (1-\beta)\mathbf{h}^{(k-1)} + \beta(\mathbf{h}^{(k-1)} + \boldsymbol{\delta}^{(k)})$
+        \item Apply constraints as in Equations~\ref{eq:direct_constraint}--\ref{eq:envelope_constraint}
+    \end{enumerate}
+    \item Return final estimate: $\hat{\mathbf{h}} \leftarrow \mathbf{h}^{(K)}$
+\end{enumerate}
+
+The estimated RIR can then be used for dereverberation via Wiener deconvolution (Equation~\ref{eq:wiener_deconvolution}) or other applications such as virtual acoustics and sound field analysis.
+
+\subsection{Computational Complexity}
+\label{subsec:complexity}
+
+The computational complexity per episode is dominated by the neural network forward and backward passes. Each forward pass through the policy network requires $\mathcal{O}(Ld + d^2)$ operations where $L$ is the RIR length and $d = 1024$ is the hidden dimension. With $K = 15$ iterations per episode, the per-episode complexity is $\mathcal{O}(K(Ld + d^2))$. The FFT operations for Wiener deconvolution contribute $\mathcal{O}(KL\log L)$ operations. For $L = 2048$ and typical speech signals of 2.5 seconds (40,000 samples), training completes in approximately 2--3 minutes for 300 episodes on a standard GPU, making the approach practical for real-world applications.

@@ -1,0 +1,129 @@
+================================================================================
+TABLE 1: NETWORK ARCHITECTURE DETAILS
+================================================================================
+Component     | Layer        | Input  | Output | Operations
+--------------|--------------|--------|--------|---------------------------
+Input         | LayerNorm    | L      | L      | Normalize RIR input
+--------------|--------------|--------|--------|---------------------------
+              | Linear 1     | L      | d      | W₁ ∈ ℝ^(d×L)
+              | LayerNorm    | d      | d      | Normalize activations
+Encoder       | ReLU         | d      | d      | Non-linearity
+              | Dropout(0.1) | d      | d      | Regularization
+              |--------------|--------|--------|
+              | Linear 2     | d      | d      | W₂ ∈ ℝ^(d×d)
+              | LayerNorm    | d      | d      | Normalize activations
+              | ReLU         | d      | d      | Non-linearity
+              | Residual     | 2d     | d      | Add input from Linear 1
+              | Dropout(0.1) | d      | d      | Regularization
+              |--------------|--------|--------|
+              | Linear 3     | d      | d/2    | W₃ ∈ ℝ^((d/2)×d)
+              | LayerNorm    | d/2    | d/2    | Normalize activations
+              | ReLU         | d/2    | d/2    | Non-linearity
+--------------|--------------|--------|--------|---------------------------
+              | ─── Direct Sound Head ───
+              | Linear       | d/2    | 32     | Hidden layer
+Actor Heads   | ReLU         | 32     | 32     | Non-linearity
+              | Linear       | 32     | 1      | Output layer
+              | Sigmoid      | 1      | 1      | δ_direct ∈ [0,1]
+              |--------------|--------|--------|
+              | ─── Early Reflections Head ───
+              | Linear       | d/2    | 128    | Hidden layer 1
+              | ReLU         | 128    | 128    | Non-linearity
+              | Linear       | 128    | 64     | Hidden layer 2
+              | Linear       | 64     | 63     | Output layer
+              | Tanh         | 63     | 63     | δ_early ∈ [-1,1]^63
+              |--------------|--------|--------|
+              | ─── Late Reverberation Head ───
+              | Linear       | d/2    | 128    | Hidden layer 1
+              | ReLU         | 128    | 128    | Non-linearity
+              | Linear       | 128    | 64     | Hidden layer 2
+              | Linear       | 64     | 192    | Output layer
+              | Tanh         | 192    | 192    | δ_late ∈ [-1,1]^192
+              |--------------|--------|--------|
+              | ─── Tail Decay Head ───
+              | Linear       | d/2    | 128    | Hidden layer 1
+              | ReLU         | 128    | 128    | Non-linearity
+              | Linear       | 128    | 32     | Hidden layer 2
+              | Linear       | 32     | L-256  | Output layer
+              | Tanh         | L-256  | L-256  | δ_tail ∈ [-1,1]^(L-256)
+--------------|--------------|--------|--------|---------------------------
+              | Linear       | d/2    | d/4    | Hidden layer 1
+              | ReLU         | d/4    | d/4    | Non-linearity
+Critic Head   | Dropout(0.1) | d/4    | d/4    | Regularization
+              | Linear       | d/4    | d/8    | Hidden layer 2
+              | ReLU         | d/8    | d/8    | Non-linearity
+              | Linear       | d/8    | 1      | Output: V(h)
+--------------|--------------|--------|--------|---------------------------
+Total Parameters: ≈3.2M (for L=2048, d=1024)
+================================================================================
+
+
+================================================================================
+TABLE 2: HYPERPARAMETERS AND COEFFICIENTS
+================================================================================
+Category              | Parameter         | Description                  | Value
+----------------------|-------------------|------------------------------|---------------
+                      | L                 | RIR length (samples)         | 256,512,1024,2048
+RIR Config            | f_s               | Sampling rate (Hz)           | 16,000
+                      | T_RIR             | RIR duration (ms)            | 16,32,64,128
+                      | T₆₀               | Reverberation time (ms)      | 100-1200
+----------------------|-------------------|------------------------------|---------------
+                      | d                 | Hidden dimension             | 1024
+Network               | Dropout rate      | Regularization probability   | 0.1
+                      | d_latent          | Latent dimension             | 512 (d/2)
+                      | d_value           | Value network hidden dims    | 256,128 (d/4,d/8)
+                      | Total parameters  | Network size                 | ≈3.2M
+----------------------|-------------------|------------------------------|---------------
+                      | α_d               | Direct sound scale           | 0.8
+                      | α_e               | Early reflections scale      | 0.15
+Acoustic Scales       | α_l               | Late reverberation scale     | 0.08
+                      | α_t               | Tail decay scale             | 0.03
+                      | β                 | RIR update momentum          | 0.2
+                      | λ                 | Wiener regularization        | 0.01
+----------------------|-------------------|------------------------------|---------------
+                      | Direct threshold  | Min direct sound strength    | 0.8
+                      | Early max ratio   | Max early/direct ratio       | 0.2
+                      | Early decay const | Early reflection decay       | 100 samples
+Envelope Constraints  | Late max ratio    | Max late/total ratio         | 0.1
+                      | Late decay rate   | Late reverb decay            | 5t_i
+                      | Tail max ratio    | Max tail/total ratio         | 0.05
+                      | Tail decay rate   | Tail decay                   | 8t_i
+                      | t_early           | Early boundary (ms)          | 20
+                      | t_late            | Late boundary (ms)           | 100
+----------------------|-------------------|------------------------------|---------------
+                      | w_DRR             | DRR reward weight            | 5.0
+                      | w_dir             | Direct sound weight          | 2.0
+                      | w_early           | Early suppression weight     | 1.0
+Reward Weights        | w_late            | Late suppression weight      | 1.0
+                      | w_tail            | Tail suppression weight      | 1.0
+                      | w_decay           | Decay reward weight          | 1.0
+                      | ρ_early^target    | Target early/direct ratio    | 0.1 (10%)
+                      | ρ_late^target     | Target late/total ratio      | 0.05 (5%)
+                      | ρ_tail^target     | Target tail/total ratio      | 0.02 (2%)
+                      | DRR scale         | DRR normalization factor     | 5.0
+                      | Direct scale      | Direct reward scale          | 3.0
+                      | Decay scale       | Decay reward scale           | 0.5
+----------------------|-------------------|------------------------------|---------------
+                      | F                 | Frame size (samples)         | 400 (25 ms)
+DRR Computation       | H                 | Hop size (samples)           | 160 (10 ms)
+                      | N_d               | Direct frames                | 20 (first 200ms)
+                      | ε                 | Numerical stability          | 10^-12
+----------------------|-------------------|------------------------------|---------------
+                      | K                 | Iterations per episode       | 15
+                      | N                 | Training episodes            | 300-1200
+                      | γ                 | Discount factor              | 0.99
+Training              | η                 | Learning rate                | 2×10^-4
+                      | λ_w               | Weight decay                 | 10^-5
+                      | α_c               | Critic loss weight           | 0.5
+                      | Gradient clip norm| Max gradient norm            | 0.5
+                      | LR schedule factor| Learning rate reduction      | 0.8
+                      | LR schedule patience| Episodes before reduction  | 10
+----------------------|-------------------|------------------------------|---------------
+                      | h₀^(0)            | Initial direct sound         | 1.0
+Initialization        | Early prob        | Bernoulli probability        | 0.03 (3%)
+                      | Early amplitude   | Early reflection scale       | 0.3
+                      | RT60 factor       | Decay acceleration           | 1/3 (faster)
+================================================================================
+
+Total: 60+ parameters across 8 categories
+All values explicitly documented for reproducibility
