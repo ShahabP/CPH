@@ -349,7 +349,7 @@ def plot_method_evolution():
                'Wiener\nFilter\n(1990s)', 
                'WPE\n(2010)', 
                'LMS\nAdaptive\n(2000s)',
-               'Our Neural-\nExp Method\n(2026)']
+               'Proposed Neural-\nExp Method\n(2026)']
     
     drr_values = [3.5, 5.2, 8.5, 6.1, 26.4]
     drr_stds = [1.2, 1.5, 2.1, 1.8, 1.1]
@@ -419,7 +419,7 @@ def plot_method_evolution():
 def plot_computational_complexity():
     """Plot computational complexity vs performance trade-off."""
     
-    methods = ['SS', 'WF', 'LMS', 'WPE', 'Ours']
+    methods = ['SS', 'WF', 'LMS', 'WPE', 'Proposed\nNeural-Exp']
     complexity = [0.05, 0.12, 0.8, 1.5, 2.5]  # Relative compute time (seconds)
     performance = [3.5, 5.2, 6.1, 8.5, 26.4]  # DRR (dB)
     colors = ['#8dd3c7', '#ffffb3', '#fb8072', '#bebada', '#2ca02c']

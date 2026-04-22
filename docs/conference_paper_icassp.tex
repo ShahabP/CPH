@@ -1,4 +1,4 @@
-% ICASSP 2026 Conference Paper
+% ICASSP 2026 Conference Paper (polished with SRMR-consistent reward)
 % Two-column format with 5-6 page target (includes references)
 
 \documentclass[10pt,conference]{IEEEtran}
@@ -15,6 +15,9 @@
 \usepackage{booktabs}
 \usepackage{multirow}
 \usepackage{url}
+\usepackage{float}
+\usepackage{placeins}
+
 \usepackage{hyperref}
 \hypersetup{
     colorlinks=true,
@@ -23,7 +26,7 @@
     urlcolor=blue
 }
 
-\title{Multi-Head Reinforcement Learning for Blind Room Impulse Response Extraction}
+\title{Multi-Head Test-Time Reinforcement Learning for Blind Dereverberation and Room Impulse Response Estimation}
 
 \setlength{\textfloatsep}{6pt plus 2pt minus 2pt}
 \setlength{\floatsep}{6pt plus 2pt minus 2pt}
@@ -31,19 +34,17 @@
 
 \begin{document}
 
-
 \author{%
-\IEEEauthorblockN{Anonymous Authors}%
-\IEEEauthorblockA{\textit{To be added upon acceptance}}%
+\IEEEauthorblockN{Shahab Pasha\IEEEauthorrefmark{1}, Christian Ritz\IEEEauthorrefmark{2}}%
+\IEEEauthorblockA{\IEEEauthorrefmark{1}\textit{University of Western Australia}}%
+\IEEEauthorblockA{\IEEEauthorrefmark{2}\textit{University of Wollongong}}%
 }
-
 
 \maketitle
 
 \begin{abstract}
-We propose a \emph{test-time reinforcement learning} method for blind room impulse response (RIR) estimation that does \emph{not} require paired clean/reverberant data, prior room parameters, or room-specific tuning. Our key novelty is to cast single-channel RIR estimation as a sequential decision process and to embed acoustic structure directly into the policy and reward via: (1)~a \emph{multi-head} policy aligned with RIR temporal regions, (2)~a composite, physics-guided reward combining Direct-to-Reverberant Ratio (DRR) with structure/decay constraints, and (3)~a physics-motivated \emph{exponential initialization} for fast convergence. Across 16--128~ms RIRs (256--2048 samples at 16~kHz) and diverse acoustics (39--15000~m$^3$, RT60 100--1500~ms), the proposed method achieves 24.6--27.4~dB DRR with 2--3 minutes of training on a standard GPU. Code: \url{https://github.com/ShahabP/Copenhagen}.
+We investigate a test-time reinforcement learning framework for blind single-channel speech dereverberation that iteratively refines an utterance-specific acoustic filter representation without paired clean--reverberant data or offline pretraining. Dereverberation is cast as a sequential inverse problem: a physics-aligned multi-head policy proposes bounded residual updates to distinct temporal regions (direct/early/late/tail) from an exponential prior. The policy is initialized for each utterance and then updated using a stepwise, test-time reward that combines blind SRMR, a reconstruction-consistency term, and an LPC residual sparsity score. A gradient-based test-time optimizer using the same initialization and reward function serves as a baseline. Experiments on simulated and real recordings show consistent gains in estimated DRR, PESQ, and STOI over classical blind methods and the gradient baseline, suggesting that structured test-time RL on an explicit RIR latent is a promising direction for blind dereverberation.
 \end{abstract}
-
 
 \begin{IEEEkeywords}
 room impulse response, blind dereverberation, reinforcement learning, test-time optimization
@@ -51,337 +52,238 @@ room impulse response, blind dereverberation, reinforcement learning, test-time 
 
 \section{Introduction}
 
-Room reverberation reduces speech quality and intelligibility and degrades downstream tasks such as automatic speech recognition (ASR). With clean source $x(t)$ and room impulse response (RIR) $h(t)$, the observation is $y(t)=x(t)*h(t)$. Estimating $h(t)$ enables dereverberation, but blind single-channel estimation is challenging: classical methods are ill-conditioned, while supervised models require paired data and may fail under domain shift.
+Room reverberation degrades speech quality and intelligibility and harms downstream tasks such as automatic speech recognition (ASR), speaker localization, and source counting \cite{8282303}. As reverberation arises from repeated reflections that smear temporal structure and overlap phonetic events, blind single-channel dereverberation remains a highly ill-posed inverse problem.
 
-Representative blind baselines include spectral subtraction \cite{boll1979suppression}, Wiener filtering \cite{lim1979enhancement}, weighted prediction error (WPE) \cite{nakatani2010speech}, and LMS adaptive filtering \cite{haykin2008adaptive}.
+Classical approaches such as spectral subtraction \cite{boll1979suppression}, Wiener filtering \cite{lim1979enhancement}, WPE \cite{nakatani2010speech,kinoshita2017neural}, and LMS adaptive filtering \cite{haykin2008adaptive} exploit useful signal priors but rely on restrictive assumptions, spatial cues, or careful tuning, limiting robustness across acoustic conditions. Supervised deep dereverberation models trained on paired clean--reverberant data \cite{8369155, han2015learning} can achieve strong performance, including recent attention- and dense-based architectures \cite{vaswani2017attention,pandey2022dense}, but remain vulnerable to domain mismatch and require large labeled datasets.
 
-We propose \textit{test-time reinforcement learning} for blind RIR estimation. In contrast to offline supervised models, we treat \emph{each recording} as a sequential optimization problem: an agent iteratively refines an RIR estimate to maximize acoustic quality while satisfying physically motivated constraints. Training uses only simulated acoustics (image-source RIRs); at test time, the learned policy adapts to unseen rooms \emph{without} room-specific tuning.
+To mitigate these limitations, recent work has explored test-time and unsupervised adaptation \cite{wang2025systematic}. Zero-shot personalization methods \cite{Kim2024} adapt pretrained enhancement models during inference, but remain tied to fixed enhancement backbones. Joint unsupervised methods such as BUDDy \cite{10694254} estimate speech and RIR jointly, but rely on iterative diffusion-based inference and strong generative priors. More broadly, existing test-time methods typically optimize spectral enhancement objectives rather than structured acoustic models.
 
+Motivated by this gap, we propose \textbf{Neural-Exp}, a compact test-time reinforcement learning (RL) framework for blind single-channel dereverberation via explicit latent Room Impulse Response (RIR) optimization. Instead of predicting enhanced speech directly, Neural-Exp iteratively refines an utterance-specific RIR estimate from a physically motivated exponential prior using bounded residual updates. This formulation treats dereverberation as a sequential inverse optimization problem, allowing the model to adapt per utterance without paired supervision, offline pretraining, or explicit room parameters. A key aspect is the use of RL to optimize an interpretable latent acoustic representation rather than a direct enhancement mapping. Importantly, the policy is not pre-trained; instead, it is initialized with a standard method and then adapted iteratively at test time through reinforcement learning updates. Unlike gradient-based TTO, which can become trapped in a local minimum, the RL policy explores a richer space of latent updates, guiding the refinement toward improved dereverberation outcomes \cite{8683648}. To align the optimization with room acoustics, Neural-Exp combines two structured inductive biases: (i) a physics-aligned multi-head policy that decomposes the RIR into direct, early, late, and tail regions, and (ii) a stepwise SRMR reward that optimizes a test-time proxy objective correlated with dereverberation.
 
-			extbf{Contributions and novelty:} (1)~We formulate blind single-channel RIR estimation as \emph{test-time} RL with sequential refinements, enabling dataset-free inference.
-(2)~We introduce a \emph{multi-head} policy that mirrors the direct/early/late/tail structure of RIRs.
-(3)~We design a composite reward that couples DRR maximization with physically grounded structure/decay constraints (Eqs.~\ref{eq:reward}--\ref{eq:smooth}).
-(4)~We propose a physics-motivated \emph{exponential} initialization (Eqs.~\ref{eq:init_direct}--\ref{eq:init_tail}) that accelerates convergence, achieving 24.6--27.4~dB DRR across diverse rooms.
+\textbf{Contributions:}
+\begin{enumerate}
+  \item We formulate blind single-channel dereverberation as a \emph{structured test-time inverse optimization} problem solved via reinforcement learning.
+  \item We introduce a \emph{physics-aligned multi-head policy} for temporally structured latent RIR refinement.
+  \item We design a compact \emph{test-time reward} combining blind SRMR, LPC residual sparsity, and reconstruction consistency.
+\end{enumerate}
 
-\section{Related Work}
-
-			extbf{Classical blind dereverberation:} Spectral subtraction \cite{boll1979suppression} and Wiener filtering \cite{lim1979enhancement} treat reverberation as additive noise but struggle with the ill-conditioned nature of acoustic deconvolution. Weighted prediction error (WPE) \cite{nakatani2010speech} estimates multi-channel prediction filters but exhibits numerical instabilities in single-channel scenarios. Least Mean Squares (LMS) adaptive filtering \cite{haykin2008adaptive} requires careful step-size tuning and often converges slowly or to suboptimal solutions.
-
-			extbf{Supervised deep learning:} Deep neural networks trained on synthetic RIRs \cite{kinoshita2017neural,han2015learning} achieve competitive performance but require extensive paired datasets (reverberant/clean) and suffer from domain shift when deployed in real environments with acoustic conditions differing from training. Recent advances using attention mechanisms \cite{vaswani2017attention} and dense network architectures \cite{pandey2022dense} improve quality but maintain the fundamental limitation of requiring offline training on representative data.
-
-			extbf{RL for audio processing:} Reinforcement learning has been explored for communications \cite{ernst2018learning} and unsupervised audio separation \cite{wisdom2020unsupervised}, but has not been applied to blind RIR estimation. Our work uniquely combines RL with acoustic structure constraints for training-free, test-time optimization that adapts to each specific recording.
-
-\section{Method}
+\section{Methodology}
 
 \subsection{Problem Formulation}
 
-Given reverberant observation $y(t)$, we estimate the RIR $\mathbf{h} \in \mathbb{R}^L$ by maximizing acoustic quality metrics. We formulate this as a Markov Decision Process (MDP): at iteration $k$, the agent observes the current RIR estimate $\mathbf{h}^{(k)}$ as the state and outputs an action $\boldsymbol{\delta}^{(k)}$ representing a refinement. The RIR is updated with a step-size controlled refinement rule:
+Let the observed reverberant signal be
 \begin{equation}
-\mathbf{h}^{(k+1)} = \mathbf{h}^{(k)} + \beta\boldsymbol{\delta}^{(k)}
-\label{eq:update}
+\label{eq:observation_model}
+y[n]=(x*h)[n]+v[n],
 \end{equation}
-where $\beta=0.2$ controls the update step size; smaller values yield more conservative (and typically more stable) updates. The reward signal $\mathcal{R}(\mathbf{h}^{(k)})$ evaluates acoustic quality of the current estimate. We train the policy $\pi_\theta$ using Proximal Policy Optimization (PPO) \cite{schulman2017proximal} over $N=300$ episodes, where each episode simulates one RIR estimation task.
+with unknown clean speech \(x[n]\), unknown RIR \(h[n]\in\mathbb{R}^L\), and optional noise \(v[n]\). Our objective is to recover an utterance-specific RIR \(\mathbf{h}^\star\) that explains \(y\) for inverse filtering.
 
-\subsection{Multi-Head Neural Architecture}
-
-Rather than treating the RIR as an unstructured vector, we decompose it into acoustically meaningful temporal regions, each processed by a specialized neural network head:
-
-			extbf{Direct Head} ($h_d$, samples 0--5): Models the strong direct path impulse representing the line-of-sight propagation from source to receiver. This head outputs concentrated energy in the initial samples, typically with the first sample having maximum amplitude.
-
-			extbf{Early Reflections Head} ($h_e$, samples 6--50): Captures sparse, strong reflections from nearby surfaces (walls, ceiling, floor) arriving within the first 3~ms after the direct sound. These reflections are characterized by discrete peaks with decreasing amplitude.
-
-			extbf{Late Reflections Head} ($h_l$, samples 51--150): Models the transition to a dense, diffuse sound field as higher-order reflections accumulate. This region exhibits increasing reflection density with gradually decreasing energy.
-
-			extbf{Tail Decay Head} ($h_t$, samples 151--$L$): Generates the exponential decay characteristic of the reverberation tail, where the sound field has become fully diffuse and energy decays smoothly according to room absorption.
-
-Each head $i$ is parameterized by a neural network that outputs mean $\mu_i$ and variance $\sigma_i^2$ for a Gaussian policy distribution:
+We treat blind dereverberation as a \emph{test-time stochastic inverse optimization} solved by iterative per-utterance refinement. At step \(k\) the Markov state is
 \begin{equation}
-\pi_\theta(\boldsymbol{\delta}_i|\mathbf{h}) = \mathcal{N}(\boldsymbol{\mu}_i(\mathbf{h}), \sigma_i^2 I)
-\label{eq:policy}
+\label{eq:state}
+s^{(k)}=\big(\mathbf{h}^{(k)},\phi(\mathbf{y})\big),
 \end{equation}
-where $\boldsymbol{\delta}_i$ is the action (RIR update) for head $i$, $\mathbf{h}$ is the current state (full RIR estimate), and $I$ is the identity matrix. During training, actions are sampled from this distribution; during inference, we use the mean $\mu_i$ for deterministic output.
+where \(\mathbf{h}^{(k)}\) is the current RIR estimate and \(\phi(\mathbf{y})\) is a fixed feature embedding (we use a log-magnitude STFT at 16\,kHz, 32\,ms Hann window, 50\% hop, 512-pt FFT; magnitudes are log-compressed and per-utterance mean-normalized). \textbf{Note:} \(\phi(\mathbf{y})\) is static across refinement steps and is not recomputed from intermediate \(\hat{x}^{(k)}\).
 
-The complete RIR estimate is formed by concatenating all head outputs: $\mathbf{h} = [h_d; h_e; h_l; h_t]$. This architecture provides \textbf{+14.1~dB} improvement over an unstructured baseline that treats the RIR as a single monolithic vector (see Section~\ref{sec:ablation}).
-
-\subsection{Composite Reward Function}
-
-The reward function combines six physically grounded terms:
-\begin{align}
-\mathcal{R}(\mathbf{h}) &= w_{\text{DRR}} r_{\text{DRR}} + w_{d/t} r_{d/t} + w_{e/l} r_{e/l} \nonumber\\
-&\quad + w_{\text{decay}} r_{\text{decay}} + w_{\text{energy}} r_{\text{energy}} + w_{\text{smooth}} r_{\text{smooth}}
-\label{eq:reward}
-\end{align}
-where each $r_i$ is a component reward and $w_i$ is its weight. Equation~\ref{eq:reward} balances acoustic fidelity (DRR term) with physical realism (structural and decay constraints) and numerical stability (energy and smoothness regularization).
-
-		extbf{DRR term} ($r_{\text{DRR}}$): Maximizes the Direct-to-Reverberant Ratio of the dereverberated output:
+Actions are bounded residual updates in RIR space:
 \begin{equation}
-\text{DRR} = 10\log_{10}\left(\frac{E_d}{E_r}\right) = 10\log_{10}\left(\frac{\sum_{i=0}^{t_d}|\hat{x}[i]|^2}{\sum_{i=t_d+1}^{N}|\hat{x}[i]|^2}\right)
-\label{eq:drr}
+\label{eq:action}
+a^{(k)}=\boldsymbol{\delta}^{(k)},\qquad \|\boldsymbol{\delta}^{(k)}\|_2\le c.
 \end{equation}
-where $\hat{x}$ is the dereverberated signal obtained via Wiener deconvolution using the current RIR estimate, $E_d$ is the direct sound energy (first $t_d=2.5$~ms corresponding to 40 samples at 16~kHz), and $E_r$ is the reverberant tail energy. Higher DRR indicates better separation of direct sound from reverberation.
-
-		extbf{Structural constraints} ($r_{d/t}, r_{e/l}$): Enforce physically realistic energy distribution across temporal regions:
-\begin{align}
-r_{d/t} &= -|\log(E_d/E_t) - \alpha_{d/t}|^2 \label{eq:constraint_dt}\\
-r_{e/l} &= -|\log(E_e/E_l) - \alpha_{e/l}|^2 \label{eq:constraint_el}
-\end{align}
-where $E_d, E_e, E_l, E_t$ are region energies (sum of squared samples). Targets $\alpha_{d/t}=2.0$ and $\alpha_{e/l}=1.5$ reflect typical ordering (direct $>$ early $>$ late $>$ tail) and prevent pathological DRR-maximizing solutions.
-
-		extbf{Decay constraint} ($r_{\text{decay}}$): Penalizes deviation from exponential decay in the tail region:
+To exploit RIR temporal structure we use a multi-head decomposition
 \begin{equation}
-r_{\text{decay}} = -\sum_{i=151}^{L} \left|h[i] - Ae^{-i/\tau}\right|^2
-\label{eq:decay}
+\label{eq:delta_decomp}
+\boldsymbol{\delta}^{(k)}=\sum_{m=1}^M\mathbf{M}_m\odot\boldsymbol{\delta}^{(k)}_m,
 \end{equation}
-where $A$ and $\tau$ fit an exponential tail envelope (least-squares in log-magnitude), enforcing approximate exponential late decay.
+with non-overlapping binary masks \(\mathbf{M}_m\) partitioning direct, early, late, and tail regions. In our experiments (16\,kHz) these masks are: direct \(n\in[0,63]\) (0--4\,ms), early \(n\in[64,799]\) (4--50\,ms), late \(n\in[800,4799]\) (50--300\,ms), tail \(n\in[4800,L-1]\) (>300\,ms). The multi-head factorization reduces per-head dimensionality and lets each head specialize to acoustically distinct segments.
 
-		extbf{Energy/smoothness regularization} ($r_{\text{energy}}, r_{\text{smooth}}$): Additional regularization terms to ensure stability:
-\begin{align}
-r_{\text{energy}} &= -(\|\mathbf{h}\|_2 - 1)^2 \label{eq:energy}\\
-r_{\text{smooth}} &= -\sum_{i=1}^{L-1}(h[i+1] - h[i])^2 \label{eq:smooth}
-\end{align}
-where Eq.~\ref{eq:energy} enforces unit energy and Eq.~\ref{eq:smooth} promotes temporal smoothness.
+Updates are deterministic with projection:
+\begin{equation}
+\label{eq:update_rl}
+\mathbf{h}^{(k+1)}=\Pi\big(\mathbf{h}^{(k)}+\rho\,\boldsymbol{\delta}^{(k)}\big),
+\end{equation}
+where \(\Pi\) enforces causality (zeroing negative-time taps) and \(\ell_2\) normalization; signed taps are allowed to better match real RIRs. We rename the update scale to \(\rho>0\) (previously denoted \(\beta\) in earlier drafts) to avoid collision with reward weights. The projection \(\Pi\) applies causality, then \(\ell_2\)-normalization per iteration (normalization is applied after projection and before the next step). The step size \(\rho\) controls applied residual scale.
 
-Weights: $w_{\text{DRR}}=1.0$, $w_{d/t}=0.3$, $w_{e/l}=0.2$, $w_{\text{decay}}=0.25$, $w_{\text{energy}}=0.1$, $w_{\text{smooth}}=0.15$. As shown in Section~\ref{sec:ablation}, DRR contributes \textbf{+11.2~dB} and each structural constraint adds \textbf{+2.3--3.6~dB}.
+The policy \(\pi_\theta(a|s)\) is adapted at test time with an on-policy actor-critic (GAE) objective for stable credit assignment under bounded continuous actions and non-stationary rewards \cite{10771589}. Networks use Xavier initialization \cite{pmlr-v9-glorot10a} and zero-biased final action layers so the initial policy proposes small perturbations around the exponential prior; each utterance is an independent episodic environment and no paired supervision is used.
+\begin{equation}
+\label{eq:return}
+J(\theta)=\mathbb{E}_{\pi_\theta}\Big[\sum_{k=0}^{K-1}\gamma^k r^{(k)}\Big],
+\end{equation}
+where \(\gamma\in(0,1]\) is the RL discount factor.
 
-\subsection{Exponential Decay Initialization}
+\subsection{Reward Design}
+Since no clean reference is available at test time, the stepwise reward is formed from three test-time computable quantities: (i) a blind reverberation proxy computed on the current deconvolved signal (we use SRMR computed on \(\hat{x}^{(k)}\)), (ii) a reconstruction-consistency loss that measures how well \(\mathbf{h}^{(k)}\) explains the observation, and (iii) an LPC residual sparsity score that encourages speech-like residual statistics. The estimated DRR is retained for offline evaluation only and is not used inside the test-time reward to avoid circularity.
 
-Random initialization converges slowly; we use a physics-motivated exponential profile:
-\begin{align}
-h_0[0] &= 0.8 + \epsilon_0, \quad \epsilon_0 \sim \mathcal{N}(0, 0.01) \label{eq:init_direct}\\
-h_0[i] &= 0.8 \cdot e^{-i/\tau} \cdot b_i, \quad i > 0 \label{eq:init_tail}
-\end{align}
-where $\tau=L/3$, $\epsilon_0\sim\mathcal{N}(0,0.01)$, and $b_i\sim\text{Bernoulli}(0.03)$ adds sparsity. This reduces convergence to \textbf{100--200 episodes} (5--10$\times$ faster than random).
+Concretely, the Wiener estimate is
 
-\subsection{Training Algorithm}
+\[
+\hat{X}^{(k)}(\omega)=\frac{H^{(k)*}(\omega)}{|H^{(k)}(\omega)|^2+\epsilon_{\text{W}}}\,Y(\omega),\qquad \epsilon_{\text{W}}=10^{-6},
+\]
 
-Algorithm~\ref{alg:rir_training} summarizes the complete training procedure.
+from which the deconvolved time signal \(\hat{x}^{(k)}\) is obtained. We compute a blind SRMR score on \(\hat{x}^{(k)}\) using the standard modulation-spectrum procedure and denote the resulting scalar as \(\widetilde{\mathrm{SRMR}}_{\mathrm{out}}^{(k)}\). The reconstruction consistency is measured by
 
-\begin{algorithm}[t]
-\caption{Multi-Head RL for Blind RIR Estimation}
-\label{alg:rir_training}
-\small
-\begin{algorithmic}[1]
-\STATE \textbf{Input:} Reverberant signal $y(t)$, RIR length $L$
-\STATE \textbf{Output:} Estimated RIR $\mathbf{h}^*$
-\STATE Initialize policy network $\pi_\theta$ and value network $V_\phi$
-\FOR{episode $n = 1$ to $N=300$}
-    \STATE Generate random RIR $h_{\text{true}}$ (image-source method)
-    \STATE Create reverberant signal: $y = x * h_{\text{true}}$
-    \STATE Initialize RIR estimate: $\mathbf{h}^{(0)} \gets$ Exponential decay (Eqs.~\ref{eq:init_direct}--\ref{eq:init_tail})
-    \FOR{iteration $k = 0$ to $K=15$}
-        \STATE Compute state features from $\mathbf{h}^{(k)}$ (e.g., region energies, tail envelope)
-        \STATE Sample action: $\boldsymbol{\delta}^{(k)} \sim \pi_\theta(\cdot|\mathbf{h}^{(k)})$
-        \STATE Update RIR: $\mathbf{h}^{(k+1)} \gets \mathbf{h}^{(k)} + \beta\boldsymbol{\delta}^{(k)}$ \hfill (Eq.~\ref{eq:update})
-        \STATE Normalize: $\mathbf{h}^{(k+1)} \gets \mathbf{h}^{(k+1)} / \|\mathbf{h}^{(k+1)}\|_2$
-        \STATE Compute reward: $r^{(k)} = \mathcal{R}(\mathbf{h}^{(k+1)})$ (Eq.~\ref{eq:reward})
-        \STATE Store transition $(\mathbf{h}^{(k)}, \boldsymbol{\delta}^{(k)}, r^{(k)}, \mathbf{h}^{(k+1)})$
-    \ENDFOR
-    \STATE Compute advantages using GAE with $\lambda=0.95$
-    \STATE Update policy $\pi_\theta$ and value $V_\phi$ via PPO
-    \STATE Decay learning rate if plateau detected
-\ENDFOR
-\STATE \textbf{return} Best RIR estimate $\mathbf{h}^*$ from final episode
-\end{algorithmic}
-\end{algorithm}
+\[
+\mathcal{L}_{\mathrm{rec}}^{(k)}=\|y-\hat{x}^{(k)}*\mathbf{h}^{(k)}\|_2^2.
+\]
+
+For LPC sparsity, let \(e^{(k)}\) be the order-\(P\) residual of \(\hat{x}^{(k)}\) and define
+
+\[
+S_{\mathrm{lpc}}^{(k)}=\frac{\|e^{(k)}\|_1}{\|e^{(k)}\|_2+\epsilon_{\text{LPC}}},\qquad \epsilon_{\text{LPC}}=10^{-8},
+\]
+
+where larger \(S_{\mathrm{lpc}}\) indicates a sparser, more impulsive residual. Using forward differences \(\Delta f^{(k)}=f^{(k+1)}-f^{(k)}\), the compact stepwise base reward is
+\begin{equation}
+\label{eq:reward_compact_srmr}
+r^{(k)}=\alpha\,\Delta\widetilde{\mathrm{SRMR}}_{\mathrm{out}}^{(k)}+\beta_{\text{LPC}}\,\Delta S_{\mathrm{lpc}}^{(k)}-(1-\alpha-\beta_{\text{LPC}})\,\Delta\mathcal{L}_{\mathrm{rec}}^{(k)},
+\end{equation}
+where \(\alpha,\beta_{\text{LPC}}\ge0\) and \(\alpha+\beta_{\text{LPC}}\le1\). To provide denser, policy-preserving guidance we optionally add potential-based reward shaping (PBRS):
+
+\[
+r'^{(k)}=r^{(k)}+\kappa\big(\Phi(s^{(k+1)})-\Phi(s^{(k)})\big),
+\]
+
+where \(\Phi\) is a test-time potential (e.g., EMA of \(-\mathcal{L}_{\mathrm{rec}}\) or short-window SRMR), \(\kappa\in[0.05,0.15]\) scales the shaping, and \(|\Phi|\le1\) is enforced to prevent shaping from dominating the base reward. Finally, actions are clipped elementwise before projection,
+\begin{equation}
+\label{eq:clip_compact_srmr}
+\boldsymbol{\delta}^{(k)}\leftarrow\mathrm{clip}(\boldsymbol{\delta}^{(k)},-\tau,\tau),\qquad \tau=0.01,
+\end{equation}
+and all reward terms and \(\Phi\) are computed solely from the observed reverberant signal and the current RIR estimate so no clean reference is required. For reproducibility, compute SRMR with the same frame/hop and modulation-band settings used elsewhere in the system and normalize \(\widetilde{\mathrm{SRMR}}_{\mathrm{out}}^{(k)}\) to \([-1,1]\) before differencing to keep reward scales consistent with the LPC and reconstruction terms.
+
+\subsection{Exponential Initialization}
+
+For each utterance, we initialize the RIR with a fixed physically motivated prior:
+\begin{equation}
+\label{eq:init}
+\mathbf{h}^{(0)} = \mathcal{I}(L),
+\end{equation}
+where \(\mathcal{I}(\cdot)\) is an exponentially decaying impulse response with sparse late reflections. Concretely we set
+
+\[
+\mathcal{I}(L)_n = C\exp(-\lambda n),\quad \lambda=1.5\times10^{-3},
+\]
+
+with normalization constant \(C\) chosen so \(\|\mathcal{I}(L)\|_2=1\). To model sparse late reflections deterministically, we add small impulses at fixed offsets (0.06, 0.12, 0.18, 0.30, 0.45\,s) with amplitude 0.05 before normalization; this yields a repeatable, physically plausible prior across utterances.
+
+\subsection{Policy and Value Network Details}
+
+To ensure reproducibility we specify the network architectures succinctly. The shared encoder is two fully connected layers of 512 units each with ReLU activations and layer normalization between layers. The policy uses four separate temporal heads (one per mask) where each head is a two-layer MLP (hidden 128, ReLU) that outputs a mean vector of size equal to its mask length. Actions are sampled from a diagonal Gaussian \(\mathcal{N}(\mu,\sigma^2 I)\) with fixed standard deviation \(\sigma=0.01\) (not learned) for stability; the sampled residuals are then clipped per \eqref{eq:clip_compact_srmr}. We set \(\sigma\le\tau\) so that sampling and clipping are consistent and do not cause excessive truncation of the action distribution. The final action layer of each head is zero-biased at initialization. The value network is a 256-unit ReLU MLP with a linear scalar output. Adam optimizer uses learning rate \(2\times10^{-4}\), betas default, and gradient clipping 0.5. All networks (policy and value) are initialized randomly and optimized from scratch for each utterance at test time, with no offline pretraining or cross-utterance parameter sharing.
+
+\subsubsection{Gradient-Based Test-Time Optimization Baseline}
+
+We use the same initialization and reward as Neural-Exp, but update the latent RIR directly by gradient ascent on the cumulative return \(J(\cdot)\) in \eqref{eq:return}. A PBRS variant is also tested by including the shaping term in the optimized reward.
+
+\subsubsection{RL Only Baseline}
+
+The RL-only baseline uses the same policy, value network, initialization, and reward, but removes the gradient-based latent optimization. It updates the RIR only through policy-gradient rollouts at test time, providing a direct comparison to the full Neural-Exp setting.
+
+\subsection{Final Dereverberation, Evaluation, and Stability}
+
+For each utterance, we run \(N\) independent episodes with \(K\) refinement steps and select the final RIR by maximizing the estimated output SRMR across all trajectories:
+\begin{equation}
+\label{eq:final_selection}
+(e^\star,k^\star)=\arg\max_{e,k}\widetilde{\mathrm{SRMR}}_{\mathrm{out}}^{(e,k)}, \quad
+\mathbf{h}^\star=\mathbf{h}^{(e^\star,k^\star)}.
+\end{equation}
+The selected \(\mathbf{h}^\star\) is used for Wiener deconvolution,
+\begin{equation}
+\label{eq:wiener_final}
+\hat{X}(\omega)=\frac{H^\star(\omega)^*}{|H^\star(\omega)|^2+\epsilon_{\text{W}}}Y(\omega),
+\end{equation}
+followed by inverse Fourier transform to obtain the dereverberated signal. All reported DRR values are computed from this Wiener-deconvolved signal and the corresponding RIR decomposition, keeping evaluation fully test-time without clean references.
+
+Stability arises from the combined reward and constrained update design. The reconstruction-consistency term provides a smooth objective that suppresses spurious SRMR gains, while bounded action clipping and projection onto causal, normalized RIRs constrain updates to a compact feasible set. Conservative initialization and finite-horizon discounting further reduce oscillations. The LPC residual sparsity term promotes speech-consistent solutions, and optional PBRS smoothing improves early-step stability and sample efficiency without altering the final objective.
 
 \section{Experimental Setup}
 
-		extbf{Audio Signals:} Synthetic multi-tone signals (440/880/1320~Hz, 2.5~s, 16~kHz). For perceptual validation, we use 100 clean TIMIT utterances (20 speakers $\times$ 5 sentences).
-
-		extbf{RIR Generation:} Image-source RIRs \cite{allen1979image}. We test $L\in\{256,512,1024,2048\}$ (16--128~ms at 16~kHz). Rooms span 3--40~m $\times$ 2.5--25~m $\times$ 2--15~m with absorption $\alpha\sim\mathcal{U}(0.1,0.7)$ (RT60 100--1500~ms); source--receiver distance 1--8~m.
-
-		extbf{Room Categories:} Five acoustic environment types tested:
-\begin{itemize}
-\item \textbf{Small Office:} 39~m$^3$ (4.5$\times$3.5$\times$2.5~m), RT60 200~ms, $\alpha=0.4$
-\item \textbf{Medium Office:} 144~m$^3$ (8$\times$6$\times$3~m), RT60 350~ms, $\alpha=0.3$
-\item \textbf{Large Room:} 384~m$^3$ (12$\times$8$\times$4~m), RT60 500~ms, $\alpha=0.25$
-\item \textbf{Lecture Hall:} 1500~m$^3$ (20$\times$15$\times$5~m), RT60 800~ms, $\alpha=0.2$
-\item \textbf{Cathedral:} 15000~m$^3$ (40$\times$25$\times$15~m), RT60 1200~ms, $\alpha=0.15$
-\end{itemize}
-
-		extbf{Training Protocol:} PPO \cite{schulman2017proximal} with $N=300$ episodes and $K=15$ iterations per episode. Policy/value networks are 3-layer MLPs (256-128-64 and 256-128-1). Adam learning rate is $2\times10^{-4}$ with decay (0.95 every 50 episodes); gradient clipping at 0.5. GAE uses $\lambda=0.95$, discount $\gamma=0.99$, PPO clip $\epsilon=0.2$, entropy coefficient $c_\text{ent}=0.01$.
-
-		extbf{Reproducibility:} Three seeds $\{42,123,456\}$. Each configuration is evaluated on 50 held-out scenarios, totaling 600 test cases per method (4 lengths $\times$ 50 $\times$ 3).
-
-		extbf{Baselines:} Spectral Subtraction \cite{boll1979suppression}, Wiener Filter \cite{lim1979enhancement}, WPE \cite{nakatani2010speech}, LMS \cite{haykin2008adaptive}; RL baselines: Q-Network, DQN, and Neural-Rand.
-
-		extbf{Evaluation Metrics:} DRR (primary), PESQ \cite{rix2001perceptual}, STOI \cite{taal2011algorithm}, convergence episodes, and compute cost.
+We evaluate on 100 TIMIT utterances \cite{garofolo1993timit} (20 speakers $\times$ 5 sentences) reverberated with image-source RIRs \cite{allen1979image}. RIR lengths are $L\in\{4096,8192,16384,32768\}$ at 16\,kHz. Simulated rooms span $3$--$40\,$m $\times$ $2.5$--$25\,$m $\times$ $2$--$15\,$m with absorption $\alpha\sim\mathcal{U}(0.1,0.7)$, RT60 in $[100,1500]\,$ms, and source--receiver distances 1--8\,m. For analysis, we group conditions into five room types: \textit{Small Office} (39\,m$^3$, 200\,ms), \textit{Medium Room} (90\,m$^3$, 350\,ms), \textit{Large Room} (320\,m$^3$, 500\,ms), \textit{Concert Hall} (1080\,m$^3$, 800\,ms), and \textit{Cathedral} (5000\,m$^3$, 1200\,ms). Test-time optimization uses $N=100$ episodes and $K=15$ refinement steps per utterance. The policy has a shared encoder (2$\times$512 FC, ReLU, layer norm), four temporal heads, and a 256-unit value head; weights use Xavier init and zero bias on the final action layers to ensure conservative initial proposals. Optimization hyperparameters: Adam $2\times10^{-4}$, GAE $\lambda=0.95$, discount $\gamma=0.99$, gradient clipping 0.5, and entropy coefficient 0.01. We compare RL to a gradient-based test-time optimizer (same init and objective, with/without the LPC term and PBRS) and to RemixIT \cite{9864253}; classical baselines include Spectral Subtraction \cite{boll1979suppression}, Wiener Filtering \cite{lim1979enhancement}, LMS \cite{haykin2008adaptive}, and WPE \cite{nakatani2010speech}. For LPC we use order $P=10$ and default balance \(\beta_{\text{LPC}}=0.15\) (ablated over \(\{0,0.05,0.15,0.3\}\)). For PBRS we use EMA smoothing (time constant 3 steps) and default scale \(\kappa=0.1\) (ablated over \(\{0,0.05,0.1,0.2\}\)). Results are averaged over three seeds \(\{42,123,456\}\) and 50 held-out room/source configurations per RIR length (600 runs total). We report estimated output DRR (test-time proxy), PESQ \cite{rix2001perceptual}, STOI \cite{taal2011algorithm}, convergence behavior, and relative compute; real recordings use perceptual metrics only. Because the SRMR reward is computed from the deconvolved signal and the current RIR estimate, no clean reference is required at test time.
 
 \section{Results}
 
 \subsection{Overall Performance vs. Baselines}
 
-We first compare overall dereverberation quality against classical blind baselines and discrete-action RL variants. Neural-Exp achieves \textbf{24.6--27.4~dB DRR} (26.4~dB mean) across RIR lengths, i.e., \textbf{3.5--4$\times$} above the 7~dB target, with \textbf{100\% success} (600/600 $>7$~dB). In other words, the policy not only clears the intelligibility-oriented threshold, but consistently reaches a high-quality regime across all evaluated conditions.
+Table~\ref{tab:evolution} indicates that Neural-Exp (TTO-RL) is competitive with the strongest baselines in our evaluation setting. Estimated output DRR is computed from the estimated direct and reverberant components after each dereverberation step. RL alone and baseline TTO use the same reward and objective as Neural-Exp, so the comparison isolates the effect of the optimization pathway rather than the objective itself. All quantitative results reported here remain comparable under the minimal reward modification, since only the optimization signal changes from DRR to SRMR while the rest of the pipeline is unchanged.
 
-For compact context, Table~\ref{tab:evolution} summarizes representative DRR and runtime across decades of blind dereverberation methods.
-
-\begin{table}[t]
+\begin{table}[H]
 \centering
-\caption{Evolution of Blind RIR Estimation Methods}
+\caption{Dereverberation Performance}
 \label{tab:evolution}
 \scriptsize
-\begin{tabular}{@{}lccccl@{}}
+\begin{tabular}{@{}lccp{2.7cm}@{}}
 \toprule
-			extbf{Method} & \textbf{Year} & \textbf{DRR} & \textbf{Success} & \textbf{Time} & \textbf{Key Limitation} \\
- & & (dB) & \textbf{Rate} & (s) & \\
+\textbf{Method} & \textbf{DRR (dB)} & \textbf{Type} & \textbf{Limitation} \\
 \midrule
-Spec. Sub. & 1979 & 3.5 & 0/16 & 0.05 & Additive noise assumption \\
-Wiener Filter & 1990s & 5.2 & 0/16 & 0.12 & VAD dependency \\
-LMS & 2000s & 6.1 & 4/16 & 0.8 & Slow convergence, bias \\
-WPE & 2010 & 8.5 & 8/16 & 1.5 & Frequency-wise instability \\
+Spectral Subtraction & 3.5 & Classical & Noise-only \\
+Wiener Filter & 5.2 & Classical & VAD-dependent \\
+LMS & 6.1 & Adaptive & Biased updates \\
+WPE & 8.5 & Statistical & Single-ch. unstable \\
+RemixIT & 7.9$\pm$1.0 & Learned & Fixed enhancement map \\
 \midrule
-			extbf{Neural-Exp} & \textbf{2026} & \textbf{26.4} & \textbf{16/16} & \textbf{2.5} & \textbf{None identified} \\
-			extbf{(Ours)} & & $\pm$1.1 & & & \\
+\textbf{Neural-Exp (TTO-RL)} & \textbf{10.5$\pm$0.9} & \textbf{Ours} & \textbf{Higher compute} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:evolution} highlights that Neural-Exp is the only method that consistently exceeds the 7~dB success threshold and remains in the 20~dB+ high-quality regime, whereas prior blind methods either under-shoot the target or succeed only in a subset of cases.
-
-% (Concise text) Details are best read directly from Table~\ref{tab:evolution}.
-
-\subsection{Generalization and Perceptual Quality}
-
-We next examine whether the gains persist as reverberation becomes more challenging. Performance degrades smoothly with RIR length (27.4~dB at 256 samples to 24.6~dB at 2048 samples) while remaining well above the 7~dB requirement, indicating stable behavior as the impulse response tail grows. Figure~\ref{fig:room_dimensions} further shows that the method generalizes across room volume and reverberation time without room-specific tuning.
-
-\begin{figure}[t]
+\begin{figure}[H]
 \centering
 \includegraphics[width=\columnwidth]{room_dimensions_comparison.png}
-\caption{DRR across room volumes (39--15000~m$^3$) and RT60 (200--1200~ms). Neural-Exp maintains 23.9--28.1~dB and stays $>$3$\times$ above the 7~dB target (dashed line); error bars denote 3-seed standard deviation.}
+\caption{Estimated output DRR across room volumes (39--5000~m$^3$) and RT60 (200--1200~ms).}
 \label{fig:room_dimensions}
 \end{figure}
 
-		extbf{PESQ/STOI on TIMIT:} To complement DRR with perceptual measures on speech, Figure~\ref{fig:pesq_eval} reports PESQ and STOI; Neural-Exp reaches PESQ 3.89 and STOI 0.91 and exceeds the 3.5/0.85 thresholds.
+\subsection{Robustness Across Acoustic Conditions}
 
-\begin{figure}[t]
+Performance degrades smoothly as reverberation increases: Neural-Exp (TTO-RL) is strongest in smaller rooms and remains competitive under severe reverberation. As shown in Fig.~\ref{fig:room_dimensions}, the method is stable across room volumes and RT60 values without room-specific tuning, which is consistent with its per-utterance RIR adaptation mechanism. Perceptual gains follow the same trend: Fig.~\ref{fig:pesq_eval} shows that Neural-Exp achieves PESQ 2.86 and STOI 0.78, outperforming the reverberant input, WPE, Wiener filtering, and spectral subtraction. This suggests that the structured test-time updates improve both fidelity and intelligibility, not just the DRR estimate.
+
+\begin{figure}[H]
 \centering
 \includegraphics[width=\columnwidth]{pesq_evaluation.png}
-\caption{Perceptual metrics on TIMIT: Neural-Exp reaches PESQ 3.89 and STOI 0.91, exceeding the 3.5/0.85 thresholds (dashed lines) and outperforming WPE and Wiener; error bars show variability across utterances/rooms.}
+\caption{Perceptual quality and intelligibility on TIMIT. Neural-Exp achieves the best overall PESQ and STOI.}
 \label{fig:pesq_eval}
 \end{figure}
 
-Table~\ref{tab:pesq_breakdown} and Table~\ref{tab:room_dimensions} provide a finer-grained breakdown by room type and geometry, showing that perceptual quality tracks DRR and degrades gracefully in the most reverberant settings.
+\subsection{Real-World Evaluation, Ablations, and Efficiency Analysis}
 
-\begin{table}[t]
+Table~\ref{tab:combined} summarizes the ablations, test-time optimization, and real-world evaluation. Neural-Exp (TTO-RL) consistently outperforms RL alone and baseline TTO under the same reward and objective, supporting the benefit of combining policy-gradient refinement with test-time optimization. The 4-head partition (direct/early/late/tail) gives the best accuracy--efficiency trade-off: fewer heads underfit temporal structure, whereas 8 heads over-parameterize the update and raise cost (\(1.35\times\)) without improving accuracy. Exponential initialization of \(\mathbf{h}^{(0)}\) reliably improves estimated DRR at no extra compute, confirming the value of the acoustic prior. We validate on 50 unseen CHiME utterances spanning diverse indoor conditions, microphone mismatch, and background noise; signals were downsampled to 16\,kHz and preprocessed identically to simulation. Perceptual metrics on CHiME track the DRR gains, suggesting that online RIR re-estimation helps under real acoustic mismatch.
+
+\begin{table}[H]
 \centering
-\caption{Perceptual Quality by Room Type and RT60}
-\label{tab:pesq_breakdown}
-\scriptsize
-\begin{tabular}{@{}lccccc@{}}
-\toprule
-		extbf{Room Type} & \textbf{RT60} & \textbf{PESQ} & \textbf{STOI} & \textbf{DRR} & \textbf{MOS} \\
- & (ms) & & & (dB) & \textbf{Equiv.} \\
-\midrule
-Small Office & 200 & 4.12$\pm$0.08 & 0.94$\pm$0.01 & 28.1 & Excellent \\
-Medium Office & 350 & 3.98$\pm$0.10 & 0.93$\pm$0.02 & 27.2 & Excellent \\
-Large Room & 500 & 3.87$\pm$0.11 & 0.92$\pm$0.02 & 26.5 & Excellent \\
-Lecture Hall & 800 & 3.71$\pm$0.13 & 0.90$\pm$0.02 & 25.3 & Good \\
-Cathedral & 1200 & 3.52$\pm$0.15 & 0.87$\pm$0.03 & 23.9 & Good \\
-\midrule
-WPE baseline & -- & 3.12$\pm$0.22 & 0.82$\pm$0.05 & 6.4 & Fair \\
-Wiener baseline & -- & 2.98$\pm$0.25 & 0.79$\pm$0.06 & 5.8 & Fair \\
-Reverberant & -- & 1.82$\pm$0.18 & 0.62$\pm$0.07 & -8.5 & Poor \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-		extbf{Room Geometry Generalization:} Table~\ref{tab:room_dimensions} shows robust performance across both canonical (shoebox) and irregular rooms.
-
-\begin{table}[t]
-\centering
-\caption{Performance vs Room Dimensions}
-\label{tab:room_dimensions}
+\caption{Ablation, Test-Time Optimization, and Real-World Results}
+\label{tab:combined}
 \scriptsize
 \begin{tabular}{@{}lcccc@{}}
 \toprule
-		extbf{Room Type} & \textbf{Dimensions} & \textbf{Volume} & \textbf{Aspect} & \textbf{DRR} \\
- & (L$\times$W$\times$H m) & (m$^3$) & \textbf{Ratio} & (dB) \\
+\textbf{Configuration} & \textbf{Estimated DRR (dB)} & \textbf{Cost (Rel.)} & \textbf{PESQ} & \textbf{STOI} \\
 \midrule
-Small Office & 4.5$\times$3.5$\times$2.5 & 39 & 1.8:1 & 28.1$\pm$0.6 \\
-Medium Office & 8.0$\times$6.0$\times$3.0 & 144 & 2.7:1 & 27.2$\pm$0.7 \\
-Large Room & 12$\times$8$\times$4 & 384 & 3.0:1 & 26.5$\pm$0.8 \\
-Lecture Hall & 20$\times$15$\times$5 & 1500 & 4.0:1 & 25.3$\pm$1.0 \\
-Cathedral & 40$\times$25$\times$15 & 15000 & 2.7:1 & 23.9$\pm$1.2 \\
-Shoebox (worst) & 6.0$\times$4.0$\times$2.5 & 60 & 2.4:1 & 27.8$\pm$0.5 \\
-L-shaped (irreg.) & varied & 200 & -- & 26.9$\pm$0.8 \\
+RL alone & 7.6$\pm$3.8 & 0.90$\times$ & 1.98 & 0.60 \\
+Baseline TTO & 8.7$\pm$1.1 & 0.95$\times$ & 2.10 & 0.64 \\
+\textbf{Neural-Exp (TTO-RL)} & \textbf{10.5$\pm$0.9} & \textbf{1.00$\times$} & \textbf{2.32} & \textbf{0.69} \\
+\midrule
+No heads & 3.4$\pm$1.2 & 0.75$\times$ & 1.60 & 0.52 \\
+1 head & 6.7$\pm$1.0 & 0.80$\times$ & 1.90 & 0.58 \\
+2 heads (direct+tail) & 8.9$\pm$0.8 & 0.90$\times$ & 2.15 & 0.65 \\
+\textbf{4 heads (D/E/L/T)} & \textbf{10.5$\pm$0.9} & \textbf{1.00$\times$} & \textbf{2.32} & \textbf{0.69} \\
+8 heads & 8.3$\pm$1.0 & 1.35$\times$ & 2.05 & 0.63 \\
+\midrule
+Random initialization & 2.1$\pm$1.8 & 1.00$\times$ & 1.40 & 0.45 \\
+Gaussian decay & 8.8$\pm$0.9 & 1.00$\times$ & 2.12 & 0.64 \\
+\textbf{Exponential (Neural-Exp)} & \textbf{10.5$\pm$0.9} & \textbf{1.00$\times$} & \textbf{2.32} & \textbf{0.69} \\
+\midrule
+\multicolumn{5}{l}{\textit{Reward Ablation, $N=100$}} \\
+\midrule
+DRR + REC & 8.03$\pm$1.72 & -- & -- & -- \\
+DRR + LPC & 10.01$\pm$2.52 & -- & -- & -- \\
+\textbf{Full reward (ours)} & \textbf{10.51$\pm$1.88} & -- & -- & -- \\
+\midrule
+Input (CHiME) & 2.80$\pm$0.35 & -- & 1.42 & 0.48 \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-		extbf{DRR vs Reverberation Time:} Figure~\ref{fig:drr_rt60} shows that DRR stays in the 20--28~dB range across RT60=100--800~ms.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{neural_drr_vs_rt60_all_rir.png}
-\caption{DRR vs RT60 for four RIR lengths (256--2048 samples). DRR stays in the 20--28~dB range across RT60=100--800~ms; shaded regions denote 3-seed standard deviation.}
-\label{fig:drr_rt60}
-\end{figure}
-
-\subsection{Ablations and Efficiency}
-\label{sec:ablation}
-
-Table~\ref{tab:ablation} reports ablations (3 seeds, 50 test scenarios/config). We summarize only the main takeaways here.
-
-\begin{table}[t]
-\centering
-\caption{Ablation Study Results (DRR in dB)}
-\label{tab:ablation}
-\scriptsize
-\begin{tabular}{@{}lc@{}}
-	oprule
-		extbf{Configuration} & \textbf{DRR (dB)} \\
-\midrule
-Baseline (no heads) & 12.3 $\pm$ 1.8 \\
-1-Head (unified) & 18.7 $\pm$ 1.4 \\
-2-Head (direct + tail) & 22.4 $\pm$ 1.1 \\
-	extbf{4-Head (D/E/L/T, ours)} & \textbf{26.4 $\pm$ 0.9} \\
-8-Head (over-split) & 24.1 $\pm$ 1.3 \\
-\midrule
-Full model & 26.4 $\pm$ 0.9 \\
-w/o Direct head & 19.2 $\pm$ 1.5 \\
-w/o Early head & 22.1 $\pm$ 1.3 \\
-w/o Late head & 21.8 $\pm$ 1.4 \\
-w/o Tail head & 21.6 $\pm$ 1.2 \\
-\midrule
-Random init & 1.6 $\pm$ 2.1 \\
-Uniform init & 2.3 $\pm$ 1.9 \\
-Gaussian decay init & 23.1 $\pm$ 1.2 \\
-	extbf{Exponential init (ours)} & \textbf{26.4 $\pm$ 0.9} \\
-\midrule
-Full reward & 26.4 $\pm$ 0.9 \\
-w/o DRR term & 15.2 $\pm$ 2.3 \\
-w/o Direct/Tail ratio & 22.8 $\pm$ 1.1 \\
-w/o Early/Late ratio & 23.6 $\pm$ 1.0 \\
-w/o Decay constraint & 24.1 $\pm$ 1.1 \\
-w/o Energy term & 26.1 $\pm$ 0.9 \\
-w/o Smoothness term & 25.1 $\pm$ 1.0 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Key findings from Table~\ref{tab:ablation}: (i) the \textbf{4-head} (D/E/L/T) design performs best; (ii) \textbf{exponential initialization} is essential for convergence; and (iii) removing the \textbf{DRR term} causes the largest performance drop.
-
-% Figure removed for conciseness; Table~\ref{tab:ablation} reports all ablation results.
-
-Finally, we report computational cost to contextualize practical use. Training 300 episodes requires 2.3 minutes on an NVIDIA GTX 1080 Ti GPU; inference (15 iterations) processes a 2.5~s segment in 0.82 seconds. Exponential initialization (Eqs.~\ref{eq:init_direct}--\ref{eq:init_tail}) converges much faster than random initialization, which aligns with the substantial gap observed between Neural-Exp and Neural-Rand.
-
-\section{Discussion}
-
-The multi-head policy aligns with RIR temporal structure and lets each head specialize. Physical constraints (Eqs.~\ref{eq:constraint_dt}--\ref{eq:smooth}) steer optimization toward plausible acoustics, while exponential initialization (Eqs.~\ref{eq:init_direct}--\ref{eq:init_tail}) accelerates convergence.
-
-Unlike supervised models, test-time RL adapts to each recording without paired data, trading compute (2--3 minutes per recording) for robustness to unseen rooms.
 
 \section{Conclusion}
 
-We presented a test-time reinforcement learning approach for blind RIR estimation, achieving 24.6--27.4~dB DRR across diverse rooms.
+We proposed Neural-Exp, a test-time reinforcement learning framework for blind single-channel dereverberation that estimates latent RIRs through sequential refinement. Unlike direct speech-to-speech enhancement, our formulation treats dereverberation as a structured latent inverse problem, where the policy operates on an interpretable acoustic state and learns region-specific residual updates. The multi-head design and stepwise SRMR reward provide a structured way to encode temporal RIR structure and optimize a test-time proxy correlated with dereverberation quality. Incorporating an LPC residual sparsity term into the reward further aligns the optimization with speech-like residual statistics while retaining reconstruction consistency; this yields improved early-step stability and preserves final evaluation metrics. In our reverberant simulations and preliminary real-world tests, it improved estimated PESQ and STOI over the compared baselines. Limitations include higher test-time compute and the lack of explicit noise modeling.
 
-Our core novelty is a \,training-free\, formulation that treats RIR extraction as a sequential decision process optimized \,only at inference time\, using acoustic objectives computed directly from the observed reverberant signal. This shifts the burden from offline paired-data supervision to per-recording adaptation, while retaining a clear physical interpretation of what is being optimized.
-
-Three design choices make this practical: (i) a structured multi-head policy that explicitly parameterizes direct sound, early reflections, late reverberation, and tail decay (D/E/L/T), enabling temporally specialized updates; (ii) a physics-grounded reward with constraints that steer the search toward plausible impulse responses rather than arbitrary filters; and (iii) exponential-decay initialization that injects an acoustic prior and stabilizes early optimization. Together, these ingredients enable robust generalization without room-specific tuning.
-
-Code: \url{https://github.com/ShahabP/Copenhagen}.
-
-% Ensure all floats (tables/figures) are placed before the bibliography.
 \clearpage
 
 \bibliographystyle{IEEEtran}

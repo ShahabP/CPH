@@ -14,6 +14,9 @@ import torch.nn.functional as F
 from scipy import signal
 from collections import deque
 import random
+import librosa
+from scipy.signal import lfilter
+from metrics.srmr import compute_srmr
 
 
 def compute_rir_drr_metric(rir: np.ndarray, sample_rate: int = 16000, 
@@ -237,6 +240,14 @@ class NeuralRIRAgent:
         self.episode_actions = []
         self.episode_rewards = []
         self.episode_values = []
+        # Reward bookkeeping for stepwise deltas (SRMR-based reward)
+        self.last_srmr = None
+        self.last_lpc_sparsity = None
+        self.last_rec = None
+
+        # Reward weights (paper defaults)
+        self.alpha = 0.6
+        self.beta_lpc = 0.15
         
     def act(self, rir_state: np.ndarray, training: bool = True) -> np.ndarray:
         """
@@ -475,116 +486,76 @@ class NeuralRIRAgent:
                       clean_audio: Optional[np.ndarray] = None,
                       sample_rate: int = 16000) -> float:
         """
-        Compute DRR-based reward for RIR estimate by dereverbarating the speech.
-        STRONGLY incentivize POSITIVE DRR values.
-        
-        Args:
-            rir: Current RIR estimate
-            reverb_audio: Reverberant audio
-            clean_audio: Clean audio (optional, for oracle metrics)
-            sample_rate: Sampling rate
-            
-        Returns:
-            Reward value
+        Compute SRMR + LPC + reconstruction-consistency stepwise reward as in the paper.
+
+        Uses stored previous-step values to compute deltas; if this is the
+        first call, deltas are zero and the method initializes bookkeeping.
         """
-        # Apply estimated RIR to dereverb the speech and compute DRR on result
         try:
-            # Use the estimated RIR to dereverberate the speech
-            from scipy import signal
-            
-            # Perform Wiener deconvolution to get dereverberated signal
             dereverberated_audio = self._dereverberate_with_rir(reverb_audio, rir)
-            
-            # Compute DRR on the dereverberated audio
-            drr = self._compute_speech_drr(dereverberated_audio, sample_rate)
-            
-        except Exception as e:
-            # Fallback: heavily penalize if dereverberation fails
-            drr = -20.0
-        
-        # HEAVILY reward POSITIVE DRR (dry speech)
-        if drr > 0:
-            # Exponential reward for positive DRR
-            drr_reward = 2.0 * np.tanh(drr / 5.0) + 1.0  # Range [1, 3] for positive DRR
-        else:
-            # Strong penalty for negative DRR
-            drr_reward = -2.0 * np.abs(drr) / 10.0  # Penalty proportional to negative DRR
-        
-        # Primary reward is DRR-based
-        rewards = {'drr': 5.0 * drr_reward}  # STRONG DRR weighting
-        
-        # Direct sound strength (should be very strong for dry RIR)
-        direct_strength = np.abs(rir[0]) if len(rir) > 0 else 0
-        # Reward very strong direct sound
-        direct_reward = min(2.0, direct_strength * 3.0)
-        rewards['direct'] = 2.0 * direct_reward
-        
-        # Penalize early reflections (we want minimal early reflections)
-        if len(rir) > 64:
-            early_energy = np.sum(rir[1:64] ** 2)
-            early_ratio = early_energy / max(rir[0] ** 2, 1e-8)
-            # Penalty for too much early energy (want < 10%)
-            early_penalty = -max(0, early_ratio - 0.1) * 2.0
-            rewards['early_suppress'] = early_penalty
-        
-        # Heavily penalize late reverberation
-        if len(rir) > 128:
-            late_start = 64
-            late_energy = np.sum(rir[late_start:late_start+128] ** 2)
-            total_energy = np.sum(rir ** 2)
-            if total_energy > 0:
-                late_ratio = late_energy / total_energy
-                # Strong penalty for late reverb (want < 5% of total)
-                late_penalty = -max(0, late_ratio - 0.05) * 5.0
-                rewards['late_suppress'] = late_penalty
-        
-        # Penalize tail presence (want minimal tail)
-        if len(rir) > 256:
-            tail_energy = np.sum(rir[256:] ** 2)
-            total_energy = np.sum(rir ** 2)
-            tail_ratio = tail_energy / max(total_energy, 1e-8)
-            # Penalty for tail (want < 2%)
-            tail_penalty = -max(0, tail_ratio - 0.02) * 3.0
-            rewards['tail_suppress'] = tail_penalty
-        
-        # Reward fast decay (dry rooms have fast decay)
-        try:
-            peak_idx = np.argmax(np.abs(rir))
-            tail = rir[peak_idx + 50:]  # Skip initial reflections
-            if len(tail) > 100:
-                # Fit exponential decay
-                t = np.arange(len(tail))
-                log_env = np.log(np.abs(tail) + 1e-12)
-                # Simple linear fit to log envelope
-                decay_slope = np.polyfit(t, log_env, 1)[0]
-                # Reward FAST decay (very negative slope)
-                decay_reward = min(2.0, -decay_slope * 0.5)
-                rewards['fast_decay'] = decay_reward
-            else:
-                rewards['fast_decay'] = 0.0
         except Exception:
-            rewards['fast_decay'] = 0.0
-        
-        # Optional: Oracle reward if clean audio available
-        if clean_audio is not None:
-            try:
-                # Deconvolve with estimated RIR
-                estimated_clean = signal.wiener(reverb_audio, noise=0.1)
-                # Simple correlation with true clean
-                if len(estimated_clean) > 0 and len(clean_audio) > 0:
-                    min_len = min(len(estimated_clean), len(clean_audio))
-                    corr = np.corrcoef(estimated_clean[:min_len], clean_audio[:min_len])[0, 1]
-                    if not np.isnan(corr):
-                        rewards['oracle'] = 0.2 * corr
-                    else:
-                        rewards['oracle'] = 0.0
-                else:
-                    rewards['oracle'] = 0.0
-            except Exception:
-                rewards['oracle'] = 0.0
-        
-        total_reward = sum(rewards.values())
-        return float(total_reward)
+            # Failure to dereverb -> strong negative reward
+            return -5.0
+
+        # SRMR on the dereverberated output (scaled to [-1,1] by compute_srmr)
+        try:
+            srmr_out = compute_srmr(dereverberated_audio, sr=sample_rate)
+        except Exception:
+            srmr_out = 0.0
+
+        # Reconstruction-consistency: ||y - x_hat * h||_2^2
+        try:
+            recon = np.convolve(dereverberated_audio, rir)[: len(reverb_audio)]
+            rec_loss = float(np.sum((reverb_audio - recon) ** 2))
+        except Exception:
+            rec_loss = float(np.sum(reverb_audio ** 2))
+
+        # LPC residual sparsity score (L1 / (L2 + eps))
+        try:
+            lpc_order = 10
+            if len(dereverberated_audio) > lpc_order + 1:
+                a = librosa.lpc(dereverberated_audio, order=lpc_order)
+                # residual = filter(1, a, x)
+                residual = lfilter([1.0], a, dereverberated_audio)
+                lpc_sparsity = (np.linalg.norm(residual, 1) /
+                                (np.linalg.norm(residual, 2) + 1e-12))
+            else:
+                lpc_sparsity = 0.0
+        except Exception:
+            lpc_sparsity = 0.0
+
+        # Compute deltas (stepwise differences)
+        if self.last_srmr is None:
+            delta_srmr = 0.0
+        else:
+            delta_srmr = float(srmr_out - self.last_srmr)
+
+        if self.last_lpc_sparsity is None:
+            delta_lpc = 0.0
+        else:
+            delta_lpc = float(lpc_sparsity - self.last_lpc_sparsity)
+
+        if self.last_rec is None:
+            delta_rec = 0.0
+        else:
+            delta_rec = float(rec_loss - self.last_rec)
+
+        # Weighted compact reward (paper: alpha, beta_lpc, rest -> rec)
+        alpha = float(self.alpha)
+        beta = float(self.beta_lpc)
+        rest = max(0.0, 1.0 - alpha - beta)
+
+        reward = alpha * delta_srmr + beta * delta_lpc - rest * delta_rec
+
+        # Update stored values for next step
+        self.last_srmr = float(srmr_out)
+        self.last_lpc_sparsity = float(lpc_sparsity)
+        self.last_rec = float(rec_loss)
+
+        # clip reward to reasonable range to stabilize learning
+        reward = float(np.clip(reward, -10.0, 10.0))
+
+        return reward
     
     def store_reward(self, reward: float):
         """Store reward for current step."""

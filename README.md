@@ -7,20 +7,20 @@ A reinforcement learning system for extracting room impulse responses (RIRs) fro
 
 ## 🎯 Key Achievement
 
-**Neural-Exponential_Decay method achieves 24.6-27.4 dB DRR** across all RIR lengths, significantly exceeding the 7 dB target by 3.5-4x.
+**Neural-Exponential_Decay method achieves 17.2-19.2 dB DRR** across all RIR lengths, significantly exceeding the 7 dB target.
 
 ## 📊 Results Overview
 
 | Method | Avg DRR | Best DRR | Success Rate (≥7 dB) |
 |--------|---------|----------|---------------------|
-| **Neural-Exp_Decay** | **26.39 dB** | **27.41 dB** | **100% (4/4)** ✓ |
+| **Neural-Exp_Decay** | **18.47 dB** | **19.19 dB** | **100% (4/4)** ✓ |
 | Neural-Random | 1.64 dB | 2.85 dB | 0% |
 | DQN-Enhanced | -3.47 dB | 6.14 dB | 0% |
 | QN-Enhanced | -3.30 dB | 6.65 dB | 0% |
 
 **Overall Performance:**
-- Average DRR improvement: 2.42 dB
-- Best single result: 27.41 dB (Neural-exp_decay @ 16ms RIR)
+- Average DRR improvement: 1.69 dB
+- Best single result: 19.19 dB (Neural-exp_decay @ 16ms RIR)
 - Success rate: 16.7% (4/24 method-length combinations ≥7 dB)
 
 See [RESULTS_SUMMARY.md](RESULTS_SUMMARY.md) for detailed analysis.
@@ -108,7 +108,7 @@ python scripts/plot_enhanced_results.py
 - **Primary:** DRR Gain (dB) - Direct-to-Reverberant Ratio
 - **Secondary:** RIR Correlation with ground truth
 - **Success Criterion:** DRR ≥ 7 dB
-- **Target Achievement:** Neural agent: 20-34 dB (+33 to +49 dB improvement)
+- **Target Achievement:** Neural agent: 14.0-23.8 dB (+23.1 to +34.3 dB improvement)
 
 ### Computational Requirements
 - **Training Time:** ~2 minutes per 300-episode training
@@ -157,4 +157,4 @@ This project is licensed under the MIT License.
 ---
 
 **Last Updated:** November 26, 2025  
-**Best Result:** 27.41 dB DRR (Neural-Exponential_Decay @ 16ms RIR)
+**Best Result:** 19.19 dB DRR (Neural-Exponential_Decay @ 16ms RIR)

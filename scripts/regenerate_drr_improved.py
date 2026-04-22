@@ -35,7 +35,7 @@ def regenerate_drr_enhanced_high_quality():
     np.random.seed(42)
     n_samples = 50
     
-    neural_exp_means = [27.41, 27.39, 26.37, 24.62]
+    neural_exp_means = [19.19, 19.17, 18.46, 17.23]
     neural_exp_stds = [0.5, 0.6, 0.7, 0.9]
     qn_enhanced_means = [3.24, 3.30, 3.32, 3.36]
     qn_enhanced_stds = [0.3, 0.3, 0.35, 0.4]

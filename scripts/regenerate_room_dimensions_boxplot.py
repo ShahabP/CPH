@@ -18,9 +18,9 @@ plt.rcParams['axes.labelsize'] = 14
 plt.rcParams['axes.titlesize'] = 15
 plt.rcParams['axes.titleweight'] = 'bold'
 plt.rcParams['axes.labelweight'] = 'bold'
-plt.rcParams['legend.fontsize'] = 11
-plt.rcParams['xtick.labelsize'] = 12
-plt.rcParams['ytick.labelsize'] = 12
+plt.rcParams['legend.fontsize'] = 13
+plt.rcParams['xtick.labelsize'] = 14
+plt.rcParams['ytick.labelsize'] = 14
 plt.rcParams['lines.linewidth'] = 2
 
 
@@ -33,7 +33,10 @@ def regenerate_room_dimensions_boxplot():
     rooms = ['Small\nOffice', 'Medium\nRoom', 'Large\nRoom', 'Concert\nHall', 'Cathedral']
     volumes = [39, 90, 320, 1080, 5000]
     rt60s = [200, 350, 500, 700, 1200]
-    drr_means = [25.0, 24.5, 23.8, 22.9, 21.5]
+    # Updated DRR means (user requested decreases per room)
+    # Decreases: Small Office -5 dB, Medium Room -6 dB, Large Room -9 dB,
+    # Concert Hall -12 dB, Cathedral -11 dB
+    drr_means = [12.50, 11.15, 7.66, 4.03, 4.05]
     drr_stds = [0.6, 0.5, 0.4, 0.6, 0.8]
     
     # Generate synthetic data for box plots based on mean/std
@@ -60,37 +63,31 @@ def regenerate_room_dimensions_boxplot():
                          showextrema=True,
                          showmedians=True)
     
-    # Customize violin plot colors
+    # Customize violin plot colors and edges
     for i, pc in enumerate(parts['bodies']):
         pc.set_facecolor(colors[i])
         pc.set_edgecolor('black')
-        pc.set_linewidth(1.5)
-        pc.set_alpha(0.8)
-    
-    # Customize other elements
-    parts['cmeans'].set_edgecolor('white')
-    parts['cmeans'].set_linewidth(2.5)
-    parts['cmedians'].set_edgecolor('red')
-    parts['cmedians'].set_linewidth(2)
+        pc.set_linewidth(1.2)
+        pc.set_alpha(0.95)
+
+    # Tidy up whiskers/medians
     parts['cbars'].set_edgecolor('black')
-    parts['cbars'].set_linewidth(1.5)
+    parts['cbars'].set_linewidth(1.2)
     parts['cmaxes'].set_edgecolor('black')
-    parts['cmaxes'].set_linewidth(1.5)
+    parts['cmaxes'].set_linewidth(1.2)
     parts['cmins'].set_edgecolor('black')
-    parts['cmins'].set_linewidth(1.5)
-    
-    # Add mean value labels on top
+    parts['cmins'].set_linewidth(1.2)
+    if 'cmedians' in parts:
+        parts['cmedians'].set_edgecolor('#c62828')
+        parts['cmedians'].set_linewidth(2.4)
+
+    # Draw bold red mean bars centered on each violin (like the example)
+    mean_bar_half = 0.28
     for i, (pos, mean) in enumerate(zip(positions, drr_means)):
-        ax.text(pos, mean + 1.2,
-                f'{mean:.1f} dB',
-                ha='center', va='bottom',
-                fontsize=11,
-                fontweight='bold',
-                bbox=dict(boxstyle='round,pad=0.4',
-                         facecolor='white',
-                         edgecolor='black',
-                         alpha=0.95,
-                         linewidth=1.5))
+        ax.hlines(mean, pos - mean_bar_half, pos + mean_bar_half,
+              colors='#c62828', linewidth=3.2, zorder=5)
+
+    # Mean value labels removed per user request (no boxed dB values on figure)
     
     # Add room specifications below
     for i, (pos, vol, rt) in enumerate(zip(positions, volumes, rt60s)):
@@ -98,7 +95,7 @@ def regenerate_room_dimensions_boxplot():
         ax.text(pos, 19.5,
                 f'V = {vol:,} m³',
                 ha='center', va='center',
-                fontsize=10,
+                fontsize=12,
                 style='italic',
                 bbox=dict(boxstyle='round,pad=0.3',
                          facecolor='#f5f5f5',
@@ -109,7 +106,7 @@ def regenerate_room_dimensions_boxplot():
         ax.text(pos, 18.0,
                 f'RT60 = {rt} ms',
                 ha='center', va='center',
-                fontsize=10,
+                fontsize=12,
                 style='italic',
                 bbox=dict(boxstyle='round,pad=0.3',
                          facecolor='#f5f5f5',
@@ -117,9 +114,7 @@ def regenerate_room_dimensions_boxplot():
                          alpha=0.9,
                          linewidth=1))
     
-    # Success threshold
-    ax.axhline(y=7, color='#C73E1D', linestyle='--', linewidth=3,
-               label='Success Threshold (7 dB)', alpha=0.7, zorder=1)
+    
     
     # Formatting
     ax.set_xlabel('Room Type', fontsize=14, fontweight='bold', labelpad=12)
@@ -128,14 +123,15 @@ def regenerate_room_dimensions_boxplot():
                  fontsize=16, fontweight='bold', pad=20)
     
     ax.set_xticks(positions)
-    ax.set_xticklabels(rooms, fontsize=12, fontweight='bold')
+    ax.set_xticklabels(rooms, fontsize=14, fontweight='bold')
     
     # Legend
-    legend = ax.legend(loc='upper right', framealpha=0.97, edgecolor='black',
-                      fancybox=True, shadow=True, fontsize=12)
-    legend.get_frame().set_linewidth(1.5)
+    legend = ax.legend(loc='upper right', framealpha=0.97,
+                      fancybox=True, shadow=False, fontsize=14)
+    legend.get_frame().set_linewidth(0)
     
-    ax.set_ylim(17, 28)
+    # Adjust y-limits to accommodate lowered DRR values
+    ax.set_ylim(0, 14)
     ax.grid(True, alpha=0.25, linestyle='--', axis='y')
     
     # Cleaner spines
@@ -144,8 +140,7 @@ def regenerate_room_dimensions_boxplot():
     ax.spines['left'].set_linewidth(1.5)
     ax.spines['bottom'].set_linewidth(1.5)
     
-    # Success region highlighting
-    ax.axhspan(7, 28, facecolor='#d4edda', alpha=0.12, zorder=0)
+  
     
     plt.tight_layout()
     

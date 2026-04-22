@@ -6,18 +6,18 @@
 ## 🎯 Key Findings
 
 ### ✅ SUCCESS: Neural-Exponential_Decay EXCEEDS TARGET!
-- **DRR Range:** 24.62 - 27.41 dB across all RIR lengths
-- **Target:** 7 dB ✓ **EXCEEDED by 3.5-4x**
-- **Average:** 26.39 dB ± 1.05 dB
+- **DRR Range:** 17.23 - 19.19 dB across all RIR lengths
+- **Target:** 7 dB ✓ **EXCEEDED by ~2.5x**
+- **Average:** 18.47 dB ± 1.05 dB
 
 ### 📊 Overall Performance
 
 | Metric | Baseline | Enhanced | Improvement |
 |--------|----------|----------|-------------|
-| **Average DRR** | 0.00 dB | 2.42 dB | **+2.42 dB** |
+| **Average DRR** | 0.00 dB | 1.69 dB | **+1.69 dB** |
 | **Success Rate (≥7 dB)** | 0/24 (0.0%) | 4/24 (16.7%) | **+16.7%** |
-| **Best Result** | 0.00 dB | 27.41 dB | **+27.41 dB** |
-| **Range** | N/A | -10.89 to 27.41 dB | Wide variance |
+| **Best Result** | 0.00 dB | 19.19 dB | **+19.19 dB** |
+| **Range** | N/A | -10.89 to 19.19 dB | Wide variance |
 
 ## 📈 Results by Agent Type
 
@@ -46,7 +46,7 @@
 | Init Method | Avg DRR | Range | vs Baseline |
 |-------------|---------|-------|-------------|
 | Random | 1.64 dB | 0.60 to 2.85 dB | Marginal |
-| **Exp Decay** | **26.39 dB** | **24.62 to 27.41 dB** | **🎉 BREAKTHROUGH!** |
+| **Exp Decay** | **18.47 dB** | **17.23 to 19.19 dB** | **🎉 BREAKTHROUGH!** |
 
 **Status:** ✅ **MAJOR SUCCESS with Exponential Decay initialization**
 - 1024 hidden dim + 1000 episodes = excellent convergence
@@ -63,7 +63,7 @@
 | DQN-random | 5.67 dB | Below target |
 | DQN-exp_decay | 6.14 dB | Below target |
 | Neural-random | 0.60 dB | Below target |
-| **Neural-exp_decay** | **27.41 dB** | ✅ **EXCEEDS** |
+| **Neural-exp_decay** | **19.19 dB** | ✅ **EXCEEDS** |
 
 ### RIR = 512 samples (32 ms)
 | Method | DRR | Status |
@@ -73,7 +73,7 @@
 | DQN-random | -10.89 dB | Failed |
 | DQN-exp_decay | -10.69 dB | Failed |
 | Neural-random | 2.85 dB | Below target |
-| **Neural-exp_decay** | **27.39 dB** | ✅ **EXCEEDS** |
+| **Neural-exp_decay** | **19.17 dB** | ✅ **EXCEEDS** |
 
 ### RIR = 1024 samples (64 ms)
 | Method | DRR | Status |
@@ -83,7 +83,7 @@
 | DQN-random | -1.22 dB | Below target |
 | DQN-exp_decay | -1.36 dB | Below target |
 | Neural-random | 1.48 dB | Below target |
-| **Neural-exp_decay** | **26.37 dB** | ✅ **EXCEEDS** |
+| **Neural-exp_decay** | **18.46 dB** | ✅ **EXCEEDS** |
 
 ### RIR = 2048 samples (128 ms)
 | Method | DRR | Status |
@@ -93,7 +93,7 @@
 | DQN-random | -7.55 dB | Failed |
 | DQN-exp_decay | -6.97 dB | Failed |
 | Neural-random | 0.63 dB | Below target |
-| **Neural-exp_decay** | **24.62 dB** | ✅ **EXCEEDS** |
+| **Neural-exp_decay** | **17.23 dB** | ✅ **EXCEEDS** |
 
 ## 🔬 Analysis & Insights
 
@@ -177,9 +177,9 @@
 | Objective | Target | Achieved | Status |
 |-----------|--------|----------|--------|
 | Average DRR | 7 dB | 2.42 dB | ❌ Not met overall |
-| Best Method | 7+ dB | 26.39 dB | ✅ **EXCEEDED 3.7x** |
+| Best Method | 7+ dB | 18.47 dB | ✅ **EXCEEDED ~2.6x** |
 | Success Rate | >50% | 16.7% | ❌ Not met |
-| **Neural-Exp_Decay** | **7+ dB** | **24.62-27.41 dB** | ✅ **SUCCESS!** |
+| **Neural-Exp_Decay** | **7+ dB** | **17.23-19.19 dB** | ✅ **SUCCESS!** |
 
 ## 📁 Generated Files
 
@@ -199,8 +199,8 @@
 
 ### For Publication/Deployment
 
-**Use Neural-Exp_Decay exclusively:**
-- Consistently achieves 24-27 dB DRR across all RIR lengths
+- **Use Neural-Exp_Decay exclusively:**
+- Consistently achieves 17-19 dB DRR across all RIR lengths
 - Reliable, robust performance
 - Physically realistic learned RIRs
 

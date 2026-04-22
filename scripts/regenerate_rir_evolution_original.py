@@ -11,12 +11,12 @@ from pathlib import Path
 # Publication settings
 plt.rcParams['figure.dpi'] = 300
 plt.rcParams['savefig.dpi'] = 300
-plt.rcParams['font.size'] = 10
+plt.rcParams['font.size'] = 12
 plt.rcParams['axes.labelsize'] = 10
 plt.rcParams['axes.titlesize'] = 11
-plt.rcParams['legend.fontsize'] = 9
-plt.rcParams['xtick.labelsize'] = 9
-plt.rcParams['ytick.labelsize'] = 9
+plt.rcParams['legend.fontsize'] = 12
+plt.rcParams['xtick.labelsize'] = 12
+plt.rcParams['ytick.labelsize'] = 12
 
 
 def regenerate_rir_evolution_original():
@@ -99,11 +99,11 @@ def regenerate_rir_evolution_original():
         ax.set_title(f'Episode {ep}', fontsize=12, fontweight='bold')
         
         # X-axis label
-        ax.set_xlabel('Time (ms)', fontsize=11, fontweight='bold')
+        ax.set_xlabel('Time (ms)', fontsize=12, fontweight='bold')
         
         # Y-axis label (only for first subplot)
         if idx == 0:
-            ax.set_ylabel('Amplitude (dB)', fontsize=11, fontweight='bold')
+            ax.set_ylabel('Amplitude (dB)', fontsize=12, fontweight='bold')
         
         # Grid
         ax.grid(True, alpha=0.25, linestyle='--', linewidth=0.8)
@@ -125,7 +125,7 @@ def regenerate_rir_evolution_original():
     # Overall title
     fig.suptitle(f'RIR Estimation Evolution During Training\n' +
                 f'RT60: 400 ms, Length: 2048 samples (128 ms @ 16 kHz)',
-                fontsize=14, fontweight='bold')
+                fontsize=16, fontweight='bold')
     
     plt.tight_layout(rect=[0, 0, 1, 0.94])
     

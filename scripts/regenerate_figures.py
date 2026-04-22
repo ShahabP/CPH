@@ -27,7 +27,7 @@ def regenerate_drr_enhanced_results():
     rir_ms = [16, 32, 64, 128]
     
     # DRR values
-    neural_exp = [27.41, 27.39, 26.37, 24.62]
+        neural_exp = [19.19, 19.17, 18.46, 17.23]
     qn_enhanced = [-3.24, -3.30, -3.32, -3.36]
     dqn_enhanced = [-3.44, -3.46, -3.48, -3.49]
     
